@@ -1,0 +1,185 @@
+openapi: 3.1.0
+info:
+  title: Mini Video Platform API
+  version: 0.1.0
+  description: Video resource contract for Milestone 1.
+servers:
+  - url: http://localhost:8080/api/v1
+paths:
+  /videos:
+    post:
+      operationId: createVideo
+      summary: Create a video resource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVideoRequest'
+      responses:
+        '201':
+          description: Video created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      operationId: listVideos
+      summary: List videos owned by the current user
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Video list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoListEnvelope'
+  /videos/{videoId}:
+    parameters:
+      - $ref: '#/components/parameters/VideoId'
+    get:
+      operationId: getVideo
+      summary: Get an owned video
+      responses:
+        '200':
+          description: Video details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteVideo
+      summary: Delete an owned video
+      responses:
+        '204':
+          description: Video deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+components:
+  parameters:
+    VideoId:
+      name: videoId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Video not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: Invalid video state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    CreateVideoRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        original_filename:
+          type: string
+          maxLength: 255
+    Video:
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - processing_version
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        original_filename:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [CREATED, DELETED]
+        processing_version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    VideoEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Video'
+    VideoList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Video'
+        next_cursor:
+          type: string
+          nullable: true
+    VideoListEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/VideoList'
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
