@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("video not found")
+	ErrNotFound      = errors.New("video not found")
 	ErrInvalidCursor = errors.New("invalid cursor")
 )
 

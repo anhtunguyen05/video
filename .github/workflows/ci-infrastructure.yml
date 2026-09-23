@@ -23,10 +23,10 @@ jobs:
       - name: Validate Compose
         run: |
           cp .env.example .env
-          docker compose config --quiet
+          docker compose -f compose.yaml config --quiet
 
       - name: Start dependencies
-        run: docker compose up -d --wait --wait-timeout 60
+        run: docker compose -f compose.yaml up -d --wait --wait-timeout 60
 
       - name: Apply migrations
         run: make migrate-up
@@ -47,4 +47,4 @@ jobs:
 
       - name: Stop dependencies
         if: always()
-        run: docker compose down -v
+        run: docker compose -f compose.yaml down -v
