@@ -1,6 +1,6 @@
 SHELL := /bin/sh
 
-COMPOSE_FILE ?= deploy/compose/docker-compose.yml
+COMPOSE_FILE ?= compose.yaml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
 
 .PHONY: help test test-unit test-integration lint fmt build dev-infra-up dev-infra-down \
@@ -13,7 +13,9 @@ help:
 		'make fmt               Format Go and frontend sources' \
 		'make build             Build available applications' \
 		'make dev-infra-up      Start local PostgreSQL, RabbitMQ and MinIO' \
-		'make dev-infra-down    Stop local infrastructure'
+		'make dev-infra-down    Stop local infrastructure' \
+		'make migrate-up       Apply PostgreSQL migrations' \
+		'make migrate-down     Roll back PostgreSQL migrations'
 
 test: test-unit test-integration
 
@@ -21,7 +23,7 @@ test-unit:
 	@set -e; \
 	if [ -f services/api/go.mod ]; then (cd services/api && go test ./...); else echo 'No API Go module yet; skipping API unit tests.'; fi; \
 	if [ -f services/worker/go.mod ]; then (cd services/worker && go test ./...); else echo 'No worker Go module yet; skipping worker unit tests.'; fi; \
-	if [ -f apps/web/package.json ]; then (cd apps/web && npm test -- --passWithNoTests); else echo 'No web package yet; skipping web unit tests.'; fi
+	if [ -f apps/web/package.json ]; then (cd apps/web && npm test); else echo 'No web package yet; skipping web unit tests.'; fi
 
 test-integration:
 	@echo 'No integration tests yet; skipping.'
@@ -62,8 +64,8 @@ web:
 	cd apps/web && npm run dev
 
 migrate-up:
-	@echo 'Migration runner is not configured in PR 1; migrations are versioned in migrations/.'
+	./scripts/migrate.sh up
 
 migrate-down:
-	@echo 'Migration runner is not configured in PR 1.'
+	./scripts/migrate.sh down
 

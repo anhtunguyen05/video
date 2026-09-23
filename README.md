@@ -184,3 +184,60 @@ The project is successful when:
 - logs and traces allow a failed video job to be followed end-to-end
 - services can be deployed independently in the final stage
 - architecture decisions are documented rather than accidental
+
+
+## 8. Local development
+
+Prerequisites:
+
+- Go
+- Node.js and npm
+- Docker Compose
+
+Initialize local configuration:
+
+~~~bash
+cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local
+~~~
+
+Start PostgreSQL, RabbitMQ and MinIO:
+
+~~~bash
+make dev-infra-up
+~~~
+
+Run migrations:
+
+~~~bash
+make migrate-up
+~~~
+
+Run the API, worker and web app in separate terminals:
+
+~~~bash
+make api
+make worker
+make web
+~~~
+
+The API health endpoints are:
+
+~~~text
+http://localhost:8080/health/live
+http://localhost:8080/health/ready
+~~~
+
+Run verification:
+
+~~~bash
+make test
+make lint
+make build
+~~~
+
+Stop local infrastructure:
+
+~~~bash
+make dev-infra-down
+~~~
