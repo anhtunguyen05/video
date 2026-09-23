@@ -1,1 +1,2 @@
-deploy/compose/docker-compose.yml
+include:
+  - deploy/compose/docker-compose.yml

@@ -3,16 +3,17 @@ package config
 import (
 	"fmt"
 	"os"
-
-	"github.com/joho/godotenv"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
 	AppEnv          string
 	HTTPAddr        string
 	DatabaseURL     string
+	DevUserID       string
 	ShutdownTimeout time.Duration
 }
 
@@ -27,6 +28,7 @@ func Load() (Config, error) {
 		AppEnv:          getenv("APP_ENV", "local"),
 		HTTPAddr:        ":" + port,
 		DatabaseURL:     getenv("DATABASE_URL", "postgres://video:video@localhost:5432/video?sslmode=disable"),
+		DevUserID:       getenv("DEV_USER_ID", "00000000-0000-4000-8000-000000000001"),
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second,
 	}, nil
 }

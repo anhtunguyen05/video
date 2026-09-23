@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"video/services/api/internal/config"
+	platformauth "video/services/api/internal/platform/auth"
 	"video/services/api/internal/platform/logging"
 	"video/services/api/internal/platform/postgres"
 	"video/services/api/internal/transport/httpapi"
@@ -27,7 +28,7 @@ func main() {
 	}
 	defer db.Close()
 
-	server := httpapi.NewServer(db)
+	server := httpapi.NewServerWithDependencies(db, nil, platformauth.StaticPrincipal{ID: cfg.DevUserID})
 	server.Addr = cfg.HTTPAddr
 	serverErr := make(chan error, 1)
 	go func() {

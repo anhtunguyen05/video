@@ -1,4 +1,15 @@
+# Windows exposes ComSpec even when OS is not forwarded into make's environment.
+ifneq ($(ComSpec),)
+SHELL := cmd.exe
+.SHELLFLAGS := /D /E:ON /V:OFF /S /C
+MIGRATE_UP := powershell -NoProfile -ExecutionPolicy Bypass -File scripts/migrate.ps1 -Direction up
+MIGRATE_DOWN := powershell -NoProfile -ExecutionPolicy Bypass -File scripts/migrate.ps1 -Direction down
+else
 SHELL := /bin/sh
+.SHELLFLAGS := -eu -c
+MIGRATE_UP := ./scripts/migrate.sh up
+MIGRATE_DOWN := ./scripts/migrate.sh down
+endif
 
 COMPOSE_FILE ?= compose.yaml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
@@ -7,43 +18,44 @@ COMPOSE := docker compose -f $(COMPOSE_FILE)
 	api worker web migrate-up migrate-down
 
 help:
-	@printf '%s\n' \
-		'make test              Run available tests' \
-		'make lint              Run available linters' \
-		'make fmt               Format Go and frontend sources' \
-		'make build             Build available applications' \
-		'make dev-infra-up      Start local PostgreSQL, RabbitMQ and MinIO' \
-		'make dev-infra-down    Stop local infrastructure' \
-		'make migrate-up       Apply PostgreSQL migrations' \
-		'make migrate-down     Roll back PostgreSQL migrations'
+	@echo make test              Run available tests
+	@echo make lint              Run available linters
+	@echo make fmt               Format Go and frontend sources
+	@echo make build             Build available applications
+	@echo make dev-infra-up      Start local PostgreSQL, RabbitMQ and MinIO
+	@echo make dev-infra-down    Stop local infrastructure
+	@echo make migrate-up        Apply PostgreSQL migrations
+	@echo make migrate-down      Roll back PostgreSQL migrations
 
 test: test-unit test-integration
 
 test-unit:
-	@set -e; \
-	if [ -f services/api/go.mod ]; then (cd services/api && go test ./...); else echo 'No API Go module yet; skipping API unit tests.'; fi; \
-	if [ -f services/worker/go.mod ]; then (cd services/worker && go test ./...); else echo 'No worker Go module yet; skipping worker unit tests.'; fi; \
-	if [ -f apps/web/package.json ]; then (cd apps/web && npm test); else echo 'No web package yet; skipping web unit tests.'; fi
+	cd services/api && go test ./...
+	cd services/worker && go test ./...
+	cd apps/web && npm test
 
 test-integration:
 	@echo 'No integration tests yet; skipping.'
 
 lint:
-	@set -e; \
-	if [ -f services/api/go.mod ]; then (cd services/api && go vet ./...); else echo 'No API Go module yet; skipping API lint.'; fi; \
-	if [ -f services/worker/go.mod ]; then (cd services/worker && go vet ./...); else echo 'No worker Go module yet; skipping worker lint.'; fi; \
-	if [ -f apps/web/package.json ]; then (cd apps/web && npm run lint); else echo 'No web package yet; skipping web lint.'; fi
+	cd services/api && go vet ./...
+	cd services/worker && go vet ./...
+	cd apps/web && npm run lint
 
+ifneq ($(ComSpec),)
 fmt:
-	@set -e; \
-	if command -v gofmt >/dev/null 2>&1; then find services -name '*.go' -type f -exec gofmt -w {} +; fi; \
-	if [ -f apps/web/package.json ]; then (cd apps/web && npm run format --if-present); fi
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem services/api,services/worker -Filter *.go -Recurse | ForEach-Object { gofmt -w $$_.FullName }"
+	cd apps/web && npm run format --if-present
+else
+fmt:
+	find services -name '*.go' -type f -exec gofmt -w {} +
+	cd apps/web && npm run format --if-present
+endif
 
 build:
-	@set -e; \
-	if [ -f services/api/go.mod ]; then (cd services/api && go build ./...); else echo 'No API Go module yet; skipping API build.'; fi; \
-	if [ -f services/worker/go.mod ]; then (cd services/worker && go build ./...); else echo 'No worker Go module yet; skipping worker build.'; fi; \
-	if [ -f apps/web/package.json ]; then (cd apps/web && npm run build); else echo 'No web package yet; skipping web build.'; fi
+	cd services/api && go build ./...
+	cd services/worker && go build ./...
+	cd apps/web && npm run build
 
 dev-infra-up:
 	$(COMPOSE) up -d
@@ -52,20 +64,17 @@ dev-infra-down:
 	$(COMPOSE) down
 
 api:
-	@test -f services/api/go.mod || (echo 'API is not implemented in PR 1.' && exit 1)
 	cd services/api && go run ./cmd/api
 
 worker:
-	@test -f services/worker/go.mod || (echo 'Worker is not implemented in PR 1.' && exit 1)
 	cd services/worker && go run ./cmd/worker
 
 web:
-	@test -f apps/web/package.json || (echo 'Web app is not implemented in PR 1.' && exit 1)
 	cd apps/web && npm run dev
 
 migrate-up:
-	./scripts/migrate.sh up
+	$(MIGRATE_UP)
 
 migrate-down:
-	./scripts/migrate.sh down
+	$(MIGRATE_DOWN)
 
