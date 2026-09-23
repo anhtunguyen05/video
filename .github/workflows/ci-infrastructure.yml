@@ -1,0 +1,50 @@
+name: CI - Infrastructure
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: services/api/go.sum
+
+      - name: Validate Compose
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Start dependencies
+        run: docker compose up -d --wait --wait-timeout 60
+
+      - name: Apply migrations
+        run: make migrate-up
+
+      - name: API health smoke test
+        shell: bash
+        run: |
+          (cd services/api && go run ./cmd/api > "$RUNNER_TEMP/api.log" 2>&1 & echo $! > "$RUNNER_TEMP/api.pid")
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health/live; then
+              echo
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/api.log"
+          exit 1
+
+      - name: Stop dependencies
+        if: always()
+        run: docker compose down -v
