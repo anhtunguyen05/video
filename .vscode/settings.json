@@ -1,0 +1,78 @@
+{
+  "files.eol": "\n",
+  "[javascript]": {
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll.eslint": "explicit"
+    },
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true
+  },
+  "[typescript]": {
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll.eslint": "explicit"
+    },
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true
+  },
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    },
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4
+  },
+  "[json]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit"
+    },
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true
+  },
+  "[yaml]": {
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+  "editor.detectIndentation": false,
+  "go.toolsManagement.autoUpdate": false,
+  "go.useLanguageServer": true,
+  "yaml.validate": true,
+  "editor.formatOnSave": true,
+  "eslint.useFlatConfig": true,
+  "eslint.workingDirectories": [
+    {
+      "directory": "./apps/web",
+      "changeProcessCWD": true
+    }
+  ],
+  "eslint.validate": [
+    "javascript",
+    "typescript"
+  ],
+  "git.ignoreLimitWarning": true,
+  "js/ts.tsserver.maxMemory": 2048,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/vendor": true,
+    "**/__pycache__": true,
+    "**/dist": true,
+    "**/coverage": true
+  },
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/node_modules/**": true,
+    "**/vendor/**": true,
+    "**/__pycache__/**": true,
+    "**/dist/**": true,
+    "**/coverage/**": true
+  }
+}
