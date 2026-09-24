@@ -79,7 +79,12 @@ tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
 .table-actions { display: flex; gap: 16px; white-space: nowrap; }
 .status { border-radius: 999px; display: inline-flex; font-size: 0.78rem; font-weight: 700; padding: 5px 9px; }
 .status-created { background: #eef2ff; color: #3730a3; }
+.status-uploading { background: #fff4e5; color: var(--warning); }
+.status-uploaded { background: #ecfdf3; color: var(--success); }
 .status-deleted { background: #f2f4f7; color: #475467; }
+.upload-progress { display: grid; gap: 8px; }
+.upload-progress-heading { display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: 700; }
+.upload-progress progress { accent-color: var(--accent); height: 10px; width: 100%; }
 .detail-card { display: grid; gap: 28px; }
 .metadata-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin: 0; }
 .metadata-grid div { border-top: 1px solid var(--border); padding-top: 12px; }

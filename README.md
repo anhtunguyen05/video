@@ -207,6 +207,11 @@ Start PostgreSQL, RabbitMQ and MinIO:
 make dev-infra-up
 ~~~
 
+The web app uploads supported MP4/WebM files directly to MinIO through a
+short-lived presigned URL. Local browser uploads expect the web origin in
+`WEB_ORIGIN` (default: `http://localhost:3000`) so MinIO can allow the PUT
+request.
+
 Run migrations:
 
 ~~~bash

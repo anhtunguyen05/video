@@ -1,4 +1,12 @@
-import type { CreateVideoInput, VideoEnvelope, VideoListEnvelope } from "@/types/video";
+import type {
+  CreateUploadInput,
+  CreateVideoInput,
+  UploadCompleteEnvelope,
+  UploadEnvelope,
+  UploadSession,
+  VideoEnvelope,
+  VideoListEnvelope,
+} from "@/types/video";
 
 type HealthResponse = {
   status: "ok";
@@ -73,5 +81,46 @@ export async function createVideo(input: CreateVideoInput): Promise<VideoEnvelop
 
 export async function deleteVideo(videoId: string): Promise<void> {
   return request<void>(`/videos/${encodeURIComponent(videoId)}`, { method: "DELETE" });
+}
+
+export async function createUpload(videoId: string, input: CreateUploadInput): Promise<UploadEnvelope> {
+  return request<UploadEnvelope>(`/videos/${encodeURIComponent(videoId)}/uploads`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function completeUpload(uploadId: string): Promise<UploadCompleteEnvelope> {
+  return request<UploadCompleteEnvelope>(`/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST" });
+}
+
+export async function abortUpload(uploadId: string): Promise<void> {
+  return request<void>(`/uploads/${encodeURIComponent(uploadId)}/abort`, { method: "POST" });
+}
+
+export function uploadFile(
+  session: UploadSession,
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(session.method, session.upload_url, true);
+    Object.entries(session.headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(100);
+        resolve();
+        return;
+      }
+      reject(new Error(`Storage upload failed with status ${xhr.status}.`));
+    });
+    xhr.addEventListener("error", () => reject(new Error("Storage upload failed.")));
+    xhr.addEventListener("abort", () => reject(new Error("Storage upload was aborted.")));
+    xhr.send(file);
+  });
 }
 

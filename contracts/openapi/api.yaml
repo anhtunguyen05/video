@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Mini Video Platform API
   version: 0.1.0
-  description: Video resource contract for Milestone 1.
+  description: Video resource and direct upload contract for Milestone 2.
 servers:
   - url: http://localhost:8080/api/v1
 paths:
@@ -67,10 +67,78 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /videos/{videoId}/uploads:
+    parameters:
+      - $ref: '#/components/parameters/VideoId'
+    post:
+      operationId: createVideoUpload
+      summary: Create a direct-to-object-storage upload session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUploadRequest'
+      responses:
+        '201':
+          description: Upload session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+  /uploads/{uploadId}/complete:
+    parameters:
+      - $ref: '#/components/parameters/UploadId'
+    post:
+      operationId: completeUpload
+      summary: Confirm that a direct upload completed
+      responses:
+        '200':
+          description: Upload confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadCompleteEnvelope'
+        '404':
+          $ref: '#/components/responses/UploadNotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+  /uploads/{uploadId}/abort:
+    parameters:
+      - $ref: '#/components/parameters/UploadId'
+    post:
+      operationId: abortUpload
+      summary: Abort a direct upload session
+      responses:
+        '204':
+          description: Upload aborted
+        '404':
+          $ref: '#/components/responses/UploadNotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 components:
   parameters:
     VideoId:
       name: videoId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UploadId:
+      name: uploadId
       in: path
       required: true
       schema:
@@ -100,6 +168,24 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
     Conflict:
       description: Invalid video state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    PayloadTooLarge:
+      description: Upload exceeds the configured size limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UnsupportedMediaType:
+      description: Upload media type is not supported
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UploadNotFound:
+      description: Upload session not found
       content:
         application/json:
           schema:
@@ -137,7 +223,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: [CREATED, DELETED]
+          enum: [CREATED, UPLOADING, UPLOADED, DELETED]
         processing_version:
           type: integer
         created_at:
@@ -169,6 +255,60 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/VideoList'
+    CreateUploadRequest:
+      type: object
+      required: [content_type, size_bytes]
+      properties:
+        content_type:
+          type: string
+          enum: [video/mp4, video/webm]
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 104857600
+    Upload:
+      type: object
+      required: [upload_id, upload_url, method, headers, expires_at]
+      properties:
+        upload_id:
+          type: string
+          format: uuid
+        upload_url:
+          type: string
+          format: uri
+        method:
+          type: string
+          enum: [PUT]
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+    UploadEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Upload'
+    UploadComplete:
+      type: object
+      required: [video_id, status]
+      properties:
+        video_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [UPLOADED]
+    UploadCompleteEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/UploadComplete'
     ErrorEnvelope:
       type: object
       required: [error]

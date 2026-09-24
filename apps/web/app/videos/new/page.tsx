@@ -8,7 +8,7 @@ export default function NewVideoPage() {
       <div>
         <p className="eyebrow">Videos</p>
         <h1 id="new-video-heading">New video</h1>
-        <p className="lede">Create a video resource before connecting its source file.</p>
+        <p className="lede">Upload an MP4 or WebM source file directly to object storage.</p>
       </div>
       <VideoCreateForm />
     </section>

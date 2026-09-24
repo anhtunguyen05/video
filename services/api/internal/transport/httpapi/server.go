@@ -17,6 +17,7 @@ import (
 type Server struct {
 	db          postgres.DB
 	videos      VideoService
+	uploads     UploadService
 	currentUser platformauth.CurrentUserProvider
 }
 
@@ -29,10 +30,14 @@ func NewServer(db postgres.DB) *http.Server {
 }
 
 func NewServerWithDependencies(db postgres.DB, videos VideoService, currentUser platformauth.CurrentUserProvider) *http.Server {
+	return NewServerWithUploadDependencies(db, videos, nil, currentUser)
+}
+
+func NewServerWithUploadDependencies(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider) *http.Server {
 	if videos == nil {
 		videos = application.NewService(mediaPostgres.NewRepository(db))
 	}
-	api := &Server{db: db, videos: videos, currentUser: currentUser}
+	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)
@@ -40,6 +45,9 @@ func NewServerWithDependencies(db postgres.DB, videos VideoService, currentUser 
 	mux.HandleFunc("GET /api/v1/videos", api.listVideos)
 	mux.HandleFunc("GET /api/v1/videos/{videoId}", api.getVideo)
 	mux.HandleFunc("DELETE /api/v1/videos/{videoId}", api.deleteVideo)
+	mux.HandleFunc("POST /api/v1/videos/{videoId}/uploads", api.createUpload)
+	mux.HandleFunc("POST /api/v1/uploads/{uploadId}/complete", api.completeUpload)
+	mux.HandleFunc("POST /api/v1/uploads/{uploadId}/abort", api.abortUpload)
 	return &http.Server{
 		Handler:           withRequestID(mux),
 		ReadHeaderTimeout: 5 * time.Second,

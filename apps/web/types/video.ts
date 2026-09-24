@@ -1,4 +1,4 @@
-export type VideoStatus = "CREATED" | "DELETED";
+export type VideoStatus = "CREATED" | "UPLOADING" | "UPLOADED" | "DELETED";
 
 export type Video = {
   id: string;
@@ -21,4 +21,26 @@ export type VideoListEnvelope = { data: VideoList };
 export type CreateVideoInput = {
   title: string;
   original_filename?: string;
+};
+
+export type CreateUploadInput = {
+  content_type: string;
+  size_bytes: number;
+};
+
+export type UploadSession = {
+  upload_id: string;
+  upload_url: string;
+  method: "PUT";
+  headers: Record<string, string>;
+  expires_at: string;
+};
+
+export type UploadEnvelope = { data: UploadSession };
+
+export type UploadCompleteEnvelope = {
+  data: {
+    video_id: string;
+    status: "UPLOADED";
+  };
 };
