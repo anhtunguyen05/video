@@ -52,7 +52,7 @@ export function VideoList() {
         <div>
           <p className="eyebrow">Library</p>
           <h1 id="videos-heading">Your videos</h1>
-          <p className="lede">Create video records now; direct uploads arrive in the next milestone.</p>
+          <p className="lede">Upload source videos directly to your private media library.</p>
         </div>
         <Link className="button button-primary" href="/videos/new">New video</Link>
       </div>
@@ -61,7 +61,7 @@ export function VideoList() {
       {!loading && videos.length === 0 ? (
         <div className="panel empty-state">
           <h2>No videos yet</h2>
-          <p>Create your first video record to start building the processing workflow.</p>
+          <p>Upload your first source video to start building the processing workflow.</p>
           <Link className="button button-secondary" href="/videos/new">Create a video</Link>
         </div>
       ) : null}

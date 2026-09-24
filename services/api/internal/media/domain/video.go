@@ -10,8 +10,10 @@ import (
 type Status string
 
 const (
-	StatusCreated Status = "CREATED"
-	StatusDeleted Status = "DELETED"
+	StatusCreated   Status = "CREATED"
+	StatusUploading Status = "UPLOADING"
+	StatusUploaded  Status = "UPLOADED"
+	StatusDeleted   Status = "DELETED"
 )
 
 var (
