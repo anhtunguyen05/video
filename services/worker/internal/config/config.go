@@ -11,6 +11,7 @@ import (
 type Config struct {
 	AppEnv          string
 	DatabaseURL     string
+	RabbitMQURL     string
 	ShutdownTimeout time.Duration
 }
 
@@ -23,6 +24,7 @@ func Load() Config {
 	return Config{
 		AppEnv:          getenv("APP_ENV", "local"),
 		DatabaseURL:     getenv("DATABASE_URL", "postgres://video:video@localhost:5432/video?sslmode=disable"),
+		RabbitMQURL:     getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 		ShutdownTimeout: time.Duration(seconds) * time.Second,
 	}
 }
