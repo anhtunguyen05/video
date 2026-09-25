@@ -80,6 +80,19 @@ type fakeObjectStorage struct {
 	presignCall bool
 }
 
+type fakePublisher struct {
+	events []ports.VideoUploaded
+	err    error
+}
+
+func (publisher *fakePublisher) PublishVideoUploaded(_ context.Context, event ports.VideoUploaded) error {
+	if publisher.err != nil {
+		return publisher.err
+	}
+	publisher.events = append(publisher.events, event)
+	return nil
+}
+
 func (storage *fakeObjectStorage) PresignPut(_ context.Context, _, _ string, _ int64, _ time.Duration) (ports.PresignedUpload, error) {
 	storage.presignCall = true
 	return storage.presigned, nil
@@ -179,6 +192,70 @@ func TestCompleteVerifiesObjectAndUpdatesVideo(t *testing.T) {
 	}
 	if result.VideoID != "video-1" || result.Status != domain.StatusUploaded || !repository.completed {
 		t.Fatalf("unexpected completion: %#v", result)
+	}
+}
+
+func TestCompletePublishesVideoUploadedEvent(t *testing.T) {
+	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	repository := &fakeUploadRepository{session: uploaddomain.Session{
+		ID:                  "upload-1",
+		VideoID:             "video-1",
+		ObjectKey:           "users/owner-1/videos/video-1/source/source.mp4",
+		Status:              uploaddomain.StatusUploading,
+		ExpectedContentType: "video/mp4",
+		ExpectedSizeBytes:   8,
+		ExpiresAt:           now.Add(time.Hour),
+	}}
+	storage := &fakeObjectStorage{
+		object: ports.ObjectInfo{Size: 8},
+		prefix: []byte{0, 0, 0, 24, 'f', 't', 'y', 'p'},
+	}
+	publisher := &fakePublisher{}
+	service := NewServiceWithPublisherAndClock(
+		repository,
+		fakeVideoReader{video: domain.Video{ID: "video-1", OwnerID: "owner-1", ProcessingVersion: 2}},
+		storage,
+		Policy{MaxSizeBytes: 100, AllowedTypes: map[string]struct{}{"video/mp4": {}}, URLExpiry: time.Minute},
+		publisher,
+		fixedClock{now: now},
+	)
+
+	if _, err := service.Complete(context.Background(), "owner-1", "upload-1"); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(publisher.events))
+	}
+	event := publisher.events[0]
+	if event.VideoID != "video-1" || event.OwnerID != "owner-1" || event.SourceObjectKey != repository.session.ObjectKey || event.ProcessingVersion != 2 {
+		t.Fatalf("unexpected event: %#v", event)
+	}
+}
+
+func TestCompleteRepublishesForCompletedSession(t *testing.T) {
+	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	repository := &fakeUploadRepository{session: uploaddomain.Session{
+		ID:        "upload-1",
+		VideoID:   "video-1",
+		ObjectKey: "users/owner-1/videos/video-1/source/source.mp4",
+		Status:    uploaddomain.StatusCompleted,
+		ExpiresAt: now.Add(time.Hour),
+	}}
+	publisher := &fakePublisher{}
+	service := NewServiceWithPublisherAndClock(
+		repository,
+		fakeVideoReader{video: domain.Video{ID: "video-1", ProcessingVersion: 1}},
+		&fakeObjectStorage{},
+		Policy{},
+		publisher,
+		fixedClock{now: now},
+	)
+
+	if _, err := service.Complete(context.Background(), "owner-1", "upload-1"); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(publisher.events))
 	}
 }
 

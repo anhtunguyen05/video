@@ -237,3 +237,23 @@ queue: media.processing-results.v1
 ```
 
 Không tạo quá nhiều exchange/queue ở giai đoạn đầu.
+
+## 14. Milestone 3 implementation boundary
+
+Milestone 3 dùng topology một hop để giữ đúng boundary hiện tại của repository:
+
+```text
+API upload complete
+      ↓
+video.uploaded.v1
+      ↓
+processing.video-uploaded.v1
+      ↓
+Worker tạo processing_job = QUEUED
+```
+
+Worker và API cùng declare exchange, durable queue và binding để queue được
+tạo ngay cả khi worker chưa khởi động trước lần upload đầu tiên.
+
+`processing.execute.v1` là boundary dành cho bước orchestration tách riêng ở
+milestone sau; Milestone 3 chưa thực hiện FFmpeg, ffprobe, retry, DLQ hay HLS.

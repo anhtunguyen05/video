@@ -17,6 +17,7 @@ import (
 	"video/services/api/internal/transport/httpapi"
 	uploadapplication "video/services/api/internal/upload/application"
 	uploadPostgres "video/services/api/internal/upload/infrastructure/postgres"
+	uploadRabbitMQ "video/services/api/internal/upload/infrastructure/rabbitmq"
 	uploadS3 "video/services/api/internal/upload/infrastructure/s3"
 )
 
@@ -47,12 +48,19 @@ func main() {
 	}
 	storageCancel()
 
+	publisher, err := uploadRabbitMQ.NewPublisher(cfg.RabbitMQURL)
+	if err != nil {
+		logger.Error("create RabbitMQ publisher", "error", err)
+		return
+	}
+	defer publisher.Close()
+
 	videoService := mediaapplication.NewService(mediaPostgres.NewRepository(db))
 	allowedTypes := make(map[string]struct{}, len(cfg.AllowedUploadMimeTypes))
 	for _, contentType := range cfg.AllowedUploadMimeTypes {
 		allowedTypes[contentType] = struct{}{}
 	}
-	uploadService := uploadapplication.NewService(
+	uploadService := uploadapplication.NewServiceWithPublisher(
 		uploadPostgres.NewRepository(db),
 		videoService,
 		storage,
@@ -61,6 +69,7 @@ func main() {
 			AllowedTypes: allowedTypes,
 			URLExpiry:    cfg.UploadURLExpiry,
 		},
+		publisher,
 	)
 	server := httpapi.NewServerWithUploadDependencies(db, videoService, uploadService, platformauth.StaticPrincipal{ID: cfg.DevUserID})
 	server.Addr = cfg.HTTPAddr

@@ -58,7 +58,7 @@ build:
 	cd apps/web && npm run build
 
 dev-infra-up:
-	$(COMPOSE) up -d
+	$(COMPOSE) up -d --wait --wait-timeout 60
 
 dev-infra-down:
 	$(COMPOSE) down

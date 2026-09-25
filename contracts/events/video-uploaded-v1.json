@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-platform.local/contracts/events/video-uploaded-v1.json",
+  "title": "video.uploaded.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "message_id",
+    "message_type",
+    "schema_version",
+    "occurred_at",
+    "correlation_id",
+    "causation_id",
+    "payload"
+  ],
+  "properties": {
+    "message_id": { "type": "string", "format": "uuid" },
+    "message_type": { "const": "video.uploaded.v1" },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "correlation_id": { "type": "string" },
+    "causation_id": { "type": "string" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["video_id", "owner_id", "source_object_key", "processing_version"],
+      "properties": {
+        "video_id": { "type": "string", "format": "uuid" },
+        "owner_id": { "type": "string", "format": "uuid" },
+        "source_object_key": { "type": "string", "minLength": 1 },
+        "processing_version": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -128,6 +128,10 @@ File thật tồn tại trong MinIO và dashboard hiển thị `UPLOADED`.
 
 ## 5. Milestone 3 — RabbitMQ + Worker
 
+Implementation choice: use the current API/worker boundary and consume
+`video.uploaded.v1` directly in the worker. A separate processing orchestrator
+and `processing.execute.v1` remain outside this milestone.
+
 Sau upload complete:
 ```text
 persist upload

@@ -47,6 +47,7 @@ type Service struct {
 	repository ports.Repository
 	videos     VideoReader
 	storage    ports.ObjectStorage
+	publisher  ports.Publisher
 	clock      Clock
 	policy     Policy
 }
@@ -66,11 +67,19 @@ type CompleteResult struct {
 }
 
 func NewService(repository ports.Repository, videos VideoReader, storage ports.ObjectStorage, policy Policy) *Service {
-	return &Service{repository: repository, videos: videos, storage: storage, clock: realClock{}, policy: policy}
+	return NewServiceWithPublisher(repository, videos, storage, policy, nil)
 }
 
 func NewServiceWithClock(repository ports.Repository, videos VideoReader, storage ports.ObjectStorage, policy Policy, clock Clock) *Service {
-	return &Service{repository: repository, videos: videos, storage: storage, clock: clock, policy: policy}
+	return NewServiceWithPublisherAndClock(repository, videos, storage, policy, nil, clock)
+}
+
+func NewServiceWithPublisher(repository ports.Repository, videos VideoReader, storage ports.ObjectStorage, policy Policy, publisher ports.Publisher) *Service {
+	return NewServiceWithPublisherAndClock(repository, videos, storage, policy, publisher, realClock{})
+}
+
+func NewServiceWithPublisherAndClock(repository ports.Repository, videos VideoReader, storage ports.ObjectStorage, policy Policy, publisher ports.Publisher, clock Clock) *Service {
+	return &Service{repository: repository, videos: videos, storage: storage, publisher: publisher, clock: clock, policy: policy}
 }
 
 func (service *Service) Create(ctx context.Context, ownerID, videoID, contentType string, sizeBytes int64) (CreateResult, error) {
@@ -135,6 +144,20 @@ func (service *Service) Complete(ctx context.Context, ownerID, uploadID string) 
 		return CompleteResult{}, fmt.Errorf("get upload: %w", err)
 	}
 	if session.Status == uploaddomain.StatusCompleted {
+		processingVersion := 1
+		if service.publisher != nil {
+			video, err := service.videos.Get(ctx, ownerID, session.VideoID)
+			if errors.Is(err, mediaapplication.ErrNotFound) {
+				return CompleteResult{}, ErrVideoNotFound
+			}
+			if err != nil {
+				return CompleteResult{}, fmt.Errorf("get completed video: %w", err)
+			}
+			processingVersion = video.ProcessingVersion
+		}
+		if err := service.publishUploaded(ctx, ownerID, session, processingVersion); err != nil {
+			return CompleteResult{}, err
+		}
 		return CompleteResult{VideoID: session.VideoID, Status: domain.StatusUploaded}, nil
 	}
 	if !session.IsActive() {
@@ -173,7 +196,37 @@ func (service *Service) Complete(ctx context.Context, ownerID, uploadID string) 
 	if err != nil {
 		return CompleteResult{}, fmt.Errorf("complete upload: %w", err)
 	}
+	video, err := service.videos.Get(ctx, ownerID, completed.VideoID)
+	if errors.Is(err, mediaapplication.ErrNotFound) {
+		return CompleteResult{}, ErrVideoNotFound
+	}
+	if err != nil {
+		return CompleteResult{}, fmt.Errorf("get completed video: %w", err)
+	}
+	if err := service.publishUploaded(ctx, ownerID, completed, video.ProcessingVersion); err != nil {
+		return CompleteResult{}, err
+	}
 	return CompleteResult{VideoID: completed.VideoID, Status: domain.StatusUploaded}, nil
+}
+
+func (service *Service) publishUploaded(ctx context.Context, ownerID string, session uploaddomain.Session, processingVersion int) error {
+	if service.publisher == nil {
+		return nil
+	}
+	if processingVersion <= 0 {
+		processingVersion = 1
+	}
+	if err := service.publisher.PublishVideoUploaded(ctx, ports.VideoUploaded{
+		VideoID:           session.VideoID,
+		OwnerID:           ownerID,
+		SourceObjectKey:   session.ObjectKey,
+		ProcessingVersion: processingVersion,
+		CorrelationID:     session.VideoID,
+		CausationID:       session.ID,
+	}); err != nil {
+		return fmt.Errorf("publish video uploaded event: %w", err)
+	}
+	return nil
 }
 
 func (service *Service) Abort(ctx context.Context, ownerID, uploadID string) error {
