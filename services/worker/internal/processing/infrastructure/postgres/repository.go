@@ -3,9 +3,11 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"video/services/worker/internal/processing/domain"
 	"video/services/worker/internal/processing/ports"
 )
@@ -84,7 +86,11 @@ func (repository *Repository) PersistMetadata(ctx context.Context, job domain.Jo
 	return nil
 }
 
-func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, asset ports.GeneratedAsset, now time.Time) error {
+func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, asset ports.GeneratedAsset, renditions []domain.Rendition, now time.Time) error {
+	plannedRenditions, err := json.Marshal(newPlannedRenditions(renditions))
+	if err != nil {
+		return err
+	}
 	result, err := repository.db.ExecContext(ctx, `
 		WITH persisted_asset AS (
 			INSERT INTO assets (
@@ -96,6 +102,22 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 			    content_type = EXCLUDED.content_type,
 			    size_bytes = EXCLUDED.size_bytes
 			RETURNING video_id
+		), persisted_renditions AS (
+			INSERT INTO renditions (
+				id, video_id, name, width, height, codec, status, created_at, updated_at
+			)
+			SELECT planned.id::uuid, $3, planned.name, planned.width, planned.height,
+			       planned.codec, 'PLANNED', $9, $9
+			FROM jsonb_to_recordset($10::jsonb)
+			     AS planned(id text, name text, width integer, height integer, codec text)
+			ON CONFLICT (video_id, name) DO UPDATE
+			SET width = EXCLUDED.width,
+			    height = EXCLUDED.height,
+			    codec = EXCLUDED.codec,
+			    status = 'PLANNED',
+			    object_prefix = NULL,
+			    updated_at = EXCLUDED.updated_at
+			RETURNING video_id
 		), updated_video AS (
 			UPDATE videos
 			SET status = 'READY', failure_code = NULL, failure_message = NULL,
@@ -104,13 +126,13 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 			RETURNING id
 		)
 		UPDATE processing_jobs
-		SET status = 'SUCCEEDED', stage = 'THUMBNAIL', finished_at = $9,
+		SET status = 'SUCCEEDED', stage = 'RENDITION_PLANNING', finished_at = $9,
 		    error_code = NULL, error_message = NULL, updated_at = $9
 		WHERE id = $1 AND status = 'RUNNING'
 		  AND EXISTS (SELECT 1 FROM persisted_asset)
 		  AND EXISTS (SELECT 1 FROM updated_video)
 	`, job.ID, asset.ID, asset.VideoID, asset.AssetType, asset.Variant,
-		asset.ObjectKey, asset.ContentType, asset.SizeBytes, now)
+		asset.ObjectKey, asset.ContentType, asset.SizeBytes, now, string(plannedRenditions))
 	if err != nil {
 		return err
 	}
@@ -122,6 +144,28 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 		return errors.New("processing job completion affected no rows")
 	}
 	return nil
+}
+
+type plannedRendition struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Codec  string `json:"codec"`
+}
+
+func newPlannedRenditions(renditions []domain.Rendition) []plannedRendition {
+	planned := make([]plannedRendition, 0, len(renditions))
+	for _, rendition := range renditions {
+		planned = append(planned, plannedRendition{
+			ID:     uuid.NewString(),
+			Name:   rendition.Name,
+			Width:  rendition.Width,
+			Height: rendition.Height,
+			Codec:  rendition.Codec,
+		})
+	}
+	return planned
 }
 
 func (repository *Repository) MarkFailed(ctx context.Context, job domain.Job, code, message string, now time.Time) error {

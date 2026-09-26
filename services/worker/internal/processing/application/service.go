@@ -184,7 +184,11 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 		ContentType: "image/jpeg",
 		SizeBytes:   thumbnailInfo.Size(),
 	}
-	if err := service.processor.MarkSucceeded(ctx, job, asset, service.clock.Now()); err != nil {
+	renditions, err := domain.PlanRenditions(metadata.Width, metadata.Height)
+	if err != nil {
+		return fmt.Errorf("plan renditions: %w", err)
+	}
+	if err := service.processor.MarkSucceeded(ctx, job, asset, renditions, service.clock.Now()); err != nil {
 		return fmt.Errorf("mark processing job succeeded: %w", err)
 	}
 	return nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ type fakeProcessor struct {
 	metadata     ports.VideoMetadata
 	sizeBytes    int64
 	asset        ports.GeneratedAsset
+	renditions   []domain.Rendition
 	failureCode  string
 	failureError string
 }
@@ -49,9 +51,10 @@ func (processor *fakeProcessor) PersistMetadata(_ context.Context, _ domain.Job,
 	return nil
 }
 
-func (processor *fakeProcessor) MarkSucceeded(_ context.Context, _ domain.Job, asset ports.GeneratedAsset, _ time.Time) error {
+func (processor *fakeProcessor) MarkSucceeded(_ context.Context, _ domain.Job, asset ports.GeneratedAsset, renditions []domain.Rendition, _ time.Time) error {
 	processor.succeeded = true
 	processor.asset = asset
+	processor.renditions = renditions
 	return nil
 }
 
@@ -184,6 +187,13 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 	}
 	if processor.asset.AssetType != "THUMBNAIL" || processor.asset.Variant != "default" || processor.asset.ObjectKey != "users/owner-1/videos/video-1/thumbnails/default.jpg" {
 		t.Fatalf("unexpected thumbnail asset: %#v", processor.asset)
+	}
+	if want := []domain.Rendition{
+		{Name: "360p", Width: 640, Height: 360, Codec: domain.PlannedRenditionCodec},
+		{Name: "720p", Width: 1280, Height: 720, Codec: domain.PlannedRenditionCodec},
+		{Name: "1080p", Width: 1920, Height: 1080, Codec: domain.PlannedRenditionCodec},
+	}; !reflect.DeepEqual(processor.renditions, want) {
+		t.Fatalf("unexpected rendition plan: %#v", processor.renditions)
 	}
 	if thumbnail.timestamp != 150*time.Millisecond || string(assets.content) != "jpeg" {
 		t.Fatalf("unexpected thumbnail output: timestamp=%s content=%q", thumbnail.timestamp, assets.content)
