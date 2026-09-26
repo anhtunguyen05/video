@@ -23,4 +23,4 @@ ENV FFPROBE_PATH=/usr/bin/ffprobe \
     PROCESSING_TEMP_DIR=/tmp/video-processing
 
 USER worker
-ENTRYPOINT ["/usr/local/bin/video-worker"]
+CMD ["/usr/local/bin/video-worker"]
