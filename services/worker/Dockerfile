@@ -20,6 +20,7 @@ RUN apt-get update \
 COPY --from=builder /out/video-worker /usr/local/bin/video-worker
 
 ENV FFPROBE_PATH=/usr/bin/ffprobe \
+    FFMPEG_PATH=/usr/bin/ffmpeg \
     PROCESSING_TEMP_DIR=/tmp/video-processing
 
 USER worker

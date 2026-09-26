@@ -44,6 +44,13 @@ type Video struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+	Thumbnail         *ThumbnailAsset
+}
+
+type ThumbnailAsset struct {
+	ObjectKey   string
+	ContentType *string
+	SizeBytes   *int64
 }
 
 func NewVideo(id, ownerID, title string, originalFilename *string, now time.Time) (Video, error) {

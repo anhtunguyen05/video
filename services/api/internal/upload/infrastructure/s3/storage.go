@@ -71,6 +71,17 @@ func (storage *Storage) PresignPut(ctx context.Context, objectKey, contentType s
 	}, nil
 }
 
+func (storage *Storage) PresignThumbnail(ctx context.Context, objectKey string, expiry time.Duration) (string, time.Time, error) {
+	if expiry <= 0 {
+		return "", time.Time{}, errors.New("presign expiry must be positive")
+	}
+	presigned, err := storage.client.PresignedGetObject(ctx, storage.bucket, objectKey, expiry, nil)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return presigned.String(), time.Now().UTC().Add(expiry), nil
+}
+
 func (storage *Storage) StatObject(ctx context.Context, objectKey string) (ports.ObjectInfo, error) {
 	info, err := storage.client.StatObject(ctx, storage.bucket, objectKey, minio.StatObjectOptions{})
 	if err != nil {

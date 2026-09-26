@@ -86,6 +86,14 @@ export function VideoDetail({ videoId }: { videoId: string }) {
             <div><p className="eyebrow">Video resource</p><h1 id="video-detail-heading">{video.title}</h1></div>
             <span className={`status status-${video.status.toLowerCase()}`}>{video.status}</span>
           </div>
+          {video.thumbnail ? (
+            <figure className="thumbnail-card">
+              <img className="thumbnail-image" src={video.thumbnail.url} alt={`Thumbnail for ${video.title}`} />
+              <figcaption>Generated thumbnail</figcaption>
+            </figure>
+          ) : (
+            <div className="thumbnail-placeholder" aria-live="polite">Thumbnail pending</div>
+          )}
           <dl className="metadata-grid">
             <div><dt>Original filename</dt><dd>{video.original_filename ?? "Not provided"}</dd></div>
             <div><dt>Created</dt><dd>{formatDate(video.created_at)}</dd></div>

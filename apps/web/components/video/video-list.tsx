@@ -67,12 +67,13 @@ export function VideoList() {
       ) : null}
       {!loading && videos.length > 0 ? (
         <div className="panel table-wrap">
-          <table>
-            <thead><tr><th scope="col">Title</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
-            <tbody>
-              {videos.map((video) => (
-                <tr key={video.id}>
-                  <th scope="row"><Link className="text-link" href={`/videos/${video.id}`}>{video.title}</Link></th>
+           <table>
+             <thead><tr><th scope="col">Preview</th><th scope="col">Title</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
+             <tbody>
+               {videos.map((video) => (
+                 <tr key={video.id}>
+                   <td>{video.thumbnail ? <img className="thumbnail-table-image" src={video.thumbnail.url} alt={`Thumbnail for ${video.title}`} /> : <span className="muted">Pending</span>}</td>
+                   <th scope="row"><Link className="text-link" href={`/videos/${video.id}`}>{video.title}</Link></th>
                   <td><span className={`status status-${video.status.toLowerCase()}`}>{video.status}</span></td>
                   <td>{formatDate(video.created_at)}</td>
                   <td className="table-actions">

@@ -187,8 +187,34 @@ Object key:
 users/{user_id}/videos/{video_id}/thumbnails/default.jpg
 ```
 
+Implementation boundary:
+- Generate one `image/jpeg` thumbnail per video processing version.
+- Use an FFmpeg timestamp around 10% of the source duration, clamped to a
+  valid timestamp for short videos.
+- Preserve the source aspect ratio and cap the longest edge at 640 pixels.
+- Persist the generated object as a `THUMBNAIL/default` asset. The asset
+  identity is unique per video, asset type, and variant.
+- Keep the object private in MinIO. The API returns a short-lived signed GET
+  URL only after checking video ownership.
+- Keep the existing sequential processing job. The video becomes `READY`
+  only after metadata and thumbnail persistence succeed.
+- Thumbnail generation failures are persisted as `FAILED`; retry policy,
+  DLQ, outbox delivery, and worker scaling remain later milestones.
+
+Database:
+```text
+assets
+```
+
+API/UI:
+```text
+Video.thumbnail.url
+Video.thumbnail.expires_at
+```
+
 ### Done when
-Dashboard hiển thị thumbnail đã generate.
+Dashboard hiển thị thumbnail đã generate từ URL có chữ ký, video có asset
+`THUMBNAIL/default`, và video chỉ chuyển sang `READY` sau khi asset tồn tại.
 
 ## 8. Milestone 6 — Rendition Planning
 

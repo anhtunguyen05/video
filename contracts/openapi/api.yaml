@@ -211,6 +211,7 @@ components:
         - status
         - metadata
         - failure
+        - thumbnail
         - processing_version
         - created_at
         - updated_at
@@ -233,6 +234,10 @@ components:
         failure:
           allOf:
             - $ref: '#/components/schemas/VideoFailure'
+          nullable: true
+        thumbnail:
+          allOf:
+            - $ref: '#/components/schemas/VideoThumbnail'
           nullable: true
         processing_version:
           type: integer
@@ -278,6 +283,16 @@ components:
         message:
           type: string
           nullable: true
+    VideoThumbnail:
+      type: object
+      required: [url, expires_at]
+      properties:
+        url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
     VideoEnvelope:
       type: object
       required: [data]

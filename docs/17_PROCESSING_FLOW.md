@@ -140,7 +140,19 @@ bitrate
 
 ## 7. Thumbnail
 
-MVP generate một thumbnail ở khoảng 10% duration với guard cho video quá ngắn.
+Milestone 5 rules:
+- generate one `image/jpeg` thumbnail at approximately 10% of the duration
+- clamp the timestamp for very short videos before the end of the source
+- preserve aspect ratio, limit the long edge to 640px, and never upscale
+- upload to `users/{owner_id}/videos/{video_id}/thumbnails/default.jpg`
+- persist one `THUMBNAIL/default` asset row in `assets`
+- mark the video `READY` only after metadata and thumbnail persistence succeed
+- expose the private object through an authenticated, short-lived signed GET URL
+
+Thumbnail generation failure marks the processing job and video as `FAILED`
+with `THUMBNAIL_GENERATION_FAILED`.
+
+The MVP thumbnail rules above define the Milestone 5 implementation boundary.
 
 ## 8. Rendition Planning
 

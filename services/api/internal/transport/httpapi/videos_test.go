@@ -18,6 +18,12 @@ type fakeVideoService struct {
 	video domain.Video
 }
 
+type fakeThumbnailSigner struct{}
+
+func (fakeThumbnailSigner) PresignThumbnail(_ context.Context, objectKey string, expiry time.Duration) (string, time.Time, error) {
+	return "http://localhost:9000/video-platform/" + objectKey + "?signed=1", time.Now().UTC().Add(expiry), nil
+}
+
 func (service *fakeVideoService) Create(_ context.Context, ownerID, title string, originalFilename *string) (domain.Video, error) {
 	service.video = domain.Video{
 		ID:                "00000000-0000-4000-8000-000000000002",
@@ -127,5 +133,29 @@ func TestGetVideoReturnsProcessedMetadata(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("body = %s, missing %s", body, expected)
 		}
+	}
+}
+
+func TestGetVideoReturnsSignedThumbnailForOwnedAsset(t *testing.T) {
+	service := &fakeVideoService{video: domain.Video{
+		ID:                "00000000-0000-4000-8000-000000000002",
+		OwnerID:           "00000000-0000-4000-8000-000000000001",
+		Title:             "Thumbnail",
+		Status:            domain.StatusReady,
+		ProcessingVersion: 1,
+		Thumbnail:         &domain.ThumbnailAsset{ObjectKey: "users/owner/videos/video/thumbnails/default.jpg"},
+	}}
+	server := NewServerWithThumbnailDependencies(nil, service, nil, platformauth.StaticPrincipal{ID: "00000000-0000-4000-8000-000000000001"}, fakeThumbnailSigner{}, time.Minute)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/videos/00000000-0000-4000-8000-000000000002", nil)
+	recorder := httptest.NewRecorder()
+
+	server.Handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"thumbnail":{"url":"http://localhost:9000/video-platform/users/owner/videos/video/thumbnails/default.jpg?signed=1"`) {
+		t.Fatalf("body = %s, want signed thumbnail URL", body)
 	}
 }

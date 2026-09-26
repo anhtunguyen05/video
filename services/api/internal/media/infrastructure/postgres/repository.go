@@ -30,7 +30,7 @@ func (repository *Repository) Create(ctx context.Context, video domain.Video) er
 
 func (repository *Repository) GetOwned(ctx context.Context, ownerID, videoID string) (domain.Video, error) {
 	row := repository.db.QueryRowContext(ctx, videoSelect+`
-		WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+		WHERE v.id = $1 AND v.owner_id = $2 AND v.deleted_at IS NULL
 	`, videoID, ownerID)
 	video, err := scanVideo(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -44,14 +44,14 @@ func (repository *Repository) GetOwned(ctx context.Context, ownerID, videoID str
 
 func (repository *Repository) ListOwned(ctx context.Context, ownerID string, limit int, cursor *ports.VideoCursor) (ports.VideoPage, error) {
 	query := videoSelect + `
-		WHERE owner_id = $1 AND deleted_at IS NULL
+		WHERE v.owner_id = $1 AND v.deleted_at IS NULL
 	`
 	args := []any{ownerID}
 	if cursor != nil {
-		query += ` AND (created_at, id) < ($2, $3)`
+		query += ` AND (v.created_at, v.id) < ($2, $3)`
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT $` + fmt.Sprint(len(args)+1)
+	query += ` ORDER BY v.created_at DESC, v.id DESC LIMIT $` + fmt.Sprint(len(args)+1)
 	args = append(args, limit+1)
 
 	rows, err := repository.db.QueryContext(ctx, query, args...)
@@ -101,11 +101,16 @@ func (repository *Repository) DeleteOwned(ctx context.Context, video domain.Vide
 }
 
 const videoSelect = `
-	SELECT id, owner_id, title, original_filename, status,
+	SELECT v.id, v.owner_id, v.title, v.original_filename, v.status,
 	       source_size_bytes, source_container, source_codec, duration_ms,
 	       width, height, frame_rate, failure_code, failure_message,
-	       processing_version, created_at, updated_at, deleted_at
-	FROM videos
+	       v.processing_version, v.created_at, v.updated_at, v.deleted_at,
+	       a.object_key, a.content_type, a.size_bytes
+	FROM videos v
+	LEFT JOIN assets a
+	  ON a.video_id = v.id
+	 AND a.asset_type = 'THUMBNAIL'
+	 AND a.variant = 'default'
 `
 
 type rowScanner interface {
@@ -126,6 +131,9 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 	var failureCode sql.NullString
 	var failureMessage sql.NullString
 	var deletedAt sql.NullTime
+	var thumbnailObjectKey sql.NullString
+	var thumbnailContentType sql.NullString
+	var thumbnailSizeBytes sql.NullInt64
 	if err := scanner.Scan(
 		&video.ID,
 		&video.OwnerID,
@@ -145,6 +153,9 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 		&video.CreatedAt,
 		&video.UpdatedAt,
 		&deletedAt,
+		&thumbnailObjectKey,
+		&thumbnailContentType,
+		&thumbnailSizeBytes,
 	); err != nil {
 		return domain.Video{}, err
 	}
@@ -191,6 +202,17 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 	if failureMessage.Valid {
 		value := failureMessage.String
 		video.FailureMessage = &value
+	}
+	if thumbnailObjectKey.Valid {
+		video.Thumbnail = &domain.ThumbnailAsset{ObjectKey: thumbnailObjectKey.String}
+		if thumbnailContentType.Valid {
+			value := thumbnailContentType.String
+			video.Thumbnail.ContentType = &value
+		}
+		if thumbnailSizeBytes.Valid {
+			value := thumbnailSizeBytes.Int64
+			video.Thumbnail.SizeBytes = &value
+		}
 	}
 	return video, nil
 }

@@ -54,6 +54,14 @@ func (storage *Storage) Download(ctx context.Context, objectKey string, destinat
 	return ports.ObjectInfo{Size: info.Size, ContentType: info.ContentType}, nil
 }
 
+func (storage *Storage) Upload(ctx context.Context, objectKey, contentType string, source io.Reader, size int64) (ports.ObjectInfo, error) {
+	info, err := storage.client.PutObject(ctx, storage.bucket, objectKey, source, size, minio.PutObjectOptions{ContentType: contentType})
+	if err != nil {
+		return ports.ObjectInfo{}, mapStorageError(err)
+	}
+	return ports.ObjectInfo{Size: info.Size, ContentType: contentType}, nil
+}
+
 func mapStorageError(err error) error {
 	if err == nil {
 		return nil
@@ -66,3 +74,4 @@ func mapStorageError(err error) error {
 }
 
 var _ ports.SourceStorage = (*Storage)(nil)
+var _ ports.AssetStorage = (*Storage)(nil)

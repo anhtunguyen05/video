@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -35,9 +36,15 @@ type videoResponse struct {
 	Status            string                 `json:"status"`
 	Metadata          *videoMetadataResponse `json:"metadata"`
 	Failure           *videoFailureResponse  `json:"failure"`
+	Thumbnail         *thumbnailResponse     `json:"thumbnail"`
 	ProcessingVersion int                    `json:"processing_version"`
 	CreatedAt         string                 `json:"created_at"`
 	UpdatedAt         string                 `json:"updated_at"`
+}
+
+type thumbnailResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 type videoMetadataResponse struct {
@@ -75,7 +82,12 @@ func (s *Server) createVideo(writer http.ResponseWriter, request *http.Request) 
 		writeAPIError(writer, request, http.StatusInternalServerError, "VIDEO_CREATE_FAILED", "The video could not be created.")
 		return
 	}
-	writeJSON(writer, http.StatusCreated, map[string]any{"data": toVideoResponse(video)})
+	response, err := s.responseForVideo(request.Context(), video)
+	if err != nil {
+		writeAPIError(writer, request, http.StatusInternalServerError, "VIDEO_ASSET_URL_FAILED", "The video asset URL could not be created.")
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"data": response})
 }
 
 func (s *Server) listVideos(writer http.ResponseWriter, request *http.Request) {
@@ -103,7 +115,12 @@ func (s *Server) listVideos(writer http.ResponseWriter, request *http.Request) {
 	}
 	items := make([]videoResponse, 0, len(page.Items))
 	for _, video := range page.Items {
-		items = append(items, toVideoResponse(video))
+		response, err := s.responseForVideo(request.Context(), video)
+		if err != nil {
+			writeAPIError(writer, request, http.StatusInternalServerError, "VIDEO_ASSET_URL_FAILED", "The video asset URL could not be created.")
+			return
+		}
+		items = append(items, response)
 	}
 	var cursor *string
 	if nextCursor != "" {
@@ -132,7 +149,12 @@ func (s *Server) getVideo(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, request, http.StatusInternalServerError, "VIDEO_GET_FAILED", "The video could not be loaded.")
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"data": toVideoResponse(video)})
+	response, err := s.responseForVideo(request.Context(), video)
+	if err != nil {
+		writeAPIError(writer, request, http.StatusInternalServerError, "VIDEO_ASSET_URL_FAILED", "The video asset URL could not be created.")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
 }
 
 func (s *Server) deleteVideo(writer http.ResponseWriter, request *http.Request) {
@@ -173,6 +195,19 @@ func decodeJSON(request *http.Request, target any) error {
 		return errors.New("request body contains multiple JSON values")
 	}
 	return nil
+}
+
+func (s *Server) responseForVideo(ctx context.Context, video domain.Video) (videoResponse, error) {
+	response := toVideoResponse(video)
+	if video.Thumbnail == nil || s.thumbnailSigner == nil {
+		return response, nil
+	}
+	url, expiresAt, err := s.thumbnailSigner.PresignThumbnail(ctx, video.Thumbnail.ObjectKey, s.thumbnailURLExpiry)
+	if err != nil {
+		return videoResponse{}, fmt.Errorf("presign thumbnail: %w", err)
+	}
+	response.Thumbnail = &thumbnailResponse{URL: url, ExpiresAt: expiresAt.Format(time.RFC3339Nano)}
+	return response, nil
 }
 
 func toVideoResponse(video domain.Video) videoResponse {

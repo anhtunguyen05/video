@@ -19,6 +19,8 @@ type Config struct {
 	S3Bucket          string
 	S3UsePathStyle    bool
 	FFProbePath       string
+	FFmpegPath        string
+	ThumbnailMaxEdge  int
 	ProcessingTempDir string
 	ShutdownTimeout   time.Duration
 }
@@ -44,9 +46,19 @@ func Load() Config {
 		S3Bucket:          getenv("S3_BUCKET", "video-platform"),
 		S3UsePathStyle:    pathStyle,
 		FFProbePath:       getenv("FFPROBE_PATH", "ffprobe"),
+		FFmpegPath:        getenv("FFMPEG_PATH", "ffmpeg"),
+		ThumbnailMaxEdge:  positiveInt("THUMBNAIL_MAX_EDGE", 640),
 		ProcessingTempDir: getenv("PROCESSING_TEMP_DIR", ""),
 		ShutdownTimeout:   time.Duration(seconds) * time.Second,
 	}
+}
+
+func positiveInt(key string, fallback int) int {
+	value, err := strconv.Atoi(getenv(key, strconv.Itoa(fallback)))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func getenv(key, fallback string) string {

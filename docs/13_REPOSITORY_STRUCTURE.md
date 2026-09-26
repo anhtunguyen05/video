@@ -222,8 +222,8 @@ migrations/
 ├── 000002_create_videos.up.sql
 ├── 000003_create_video_uploads.up.sql
 ├── 000004_create_processing_jobs.up.sql
-├── 000005_create_assets.up.sql
-└── 000006_create_renditions.up.sql
+├── 000005_prepare_metadata_processing.up.sql
+└── 000006_create_assets.up.sql
 ```
 
 ## 10. Platform package
