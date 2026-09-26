@@ -81,6 +81,9 @@ tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
 .status-created { background: #eef2ff; color: #3730a3; }
 .status-uploading { background: #fff4e5; color: var(--warning); }
 .status-uploaded { background: #ecfdf3; color: var(--success); }
+.status-queued, .status-processing { background: #fff4e5; color: var(--warning); }
+.status-ready { background: #ecfdf3; color: var(--success); }
+.status-failed { background: #fef3f2; color: var(--danger); }
 .status-deleted { background: #f2f4f7; color: #475467; }
 .upload-progress { display: grid; gap: 8px; }
 .upload-progress-heading { display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: 700; }

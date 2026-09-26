@@ -101,8 +101,10 @@ func (repository *Repository) DeleteOwned(ctx context.Context, video domain.Vide
 }
 
 const videoSelect = `
-	SELECT id, owner_id, title, original_filename, status, processing_version,
-	       created_at, updated_at, deleted_at
+	SELECT id, owner_id, title, original_filename, status,
+	       source_size_bytes, source_container, source_codec, duration_ms,
+	       width, height, frame_rate, failure_code, failure_message,
+	       processing_version, created_at, updated_at, deleted_at
 	FROM videos
 `
 
@@ -114,6 +116,15 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 	var video domain.Video
 	var originalFilename sql.NullString
 	var status string
+	var sourceSizeBytes sql.NullInt64
+	var sourceContainer sql.NullString
+	var sourceCodec sql.NullString
+	var durationMS sql.NullInt64
+	var width sql.NullInt64
+	var height sql.NullInt64
+	var frameRate sql.NullFloat64
+	var failureCode sql.NullString
+	var failureMessage sql.NullString
 	var deletedAt sql.NullTime
 	if err := scanner.Scan(
 		&video.ID,
@@ -121,6 +132,15 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 		&video.Title,
 		&originalFilename,
 		&status,
+		&sourceSizeBytes,
+		&sourceContainer,
+		&sourceCodec,
+		&durationMS,
+		&width,
+		&height,
+		&frameRate,
+		&failureCode,
+		&failureMessage,
 		&video.ProcessingVersion,
 		&video.CreatedAt,
 		&video.UpdatedAt,
@@ -136,6 +156,42 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 		video.DeletedAt = &value
 	}
 	video.Status = domain.Status(status)
+	if sourceSizeBytes.Valid {
+		value := sourceSizeBytes.Int64
+		video.SourceSizeBytes = &value
+	}
+	if sourceContainer.Valid {
+		value := sourceContainer.String
+		video.SourceContainer = &value
+	}
+	if sourceCodec.Valid {
+		value := sourceCodec.String
+		video.SourceCodec = &value
+	}
+	if durationMS.Valid {
+		value := durationMS.Int64
+		video.DurationMS = &value
+	}
+	if width.Valid {
+		value := int(width.Int64)
+		video.Width = &value
+	}
+	if height.Valid {
+		value := int(height.Int64)
+		video.Height = &value
+	}
+	if frameRate.Valid {
+		value := frameRate.Float64
+		video.FrameRate = &value
+	}
+	if failureCode.Valid {
+		value := failureCode.String
+		video.FailureCode = &value
+	}
+	if failureMessage.Valid {
+		value := failureMessage.String
+		video.FailureMessage = &value
+	}
 	return video, nil
 }
 

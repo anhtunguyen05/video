@@ -15,14 +15,15 @@ COMPOSE_FILE ?= compose.yaml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
 
 .PHONY: help test test-unit test-integration lint fmt build dev-infra-up dev-infra-down \
-	api worker web migrate-up migrate-down
+	api worker worker-docker web migrate-up migrate-down
 
 help:
 	@echo make test              Run available tests
 	@echo make lint              Run available linters
 	@echo make fmt               Format Go and frontend sources
 	@echo make build             Build available applications
-	@echo make dev-infra-up      Start local PostgreSQL, RabbitMQ and MinIO
+	@echo make dev-infra-up      Start local infrastructure and Docker worker
+	@echo make worker-docker     Build and start the Docker worker with FFmpeg
 	@echo make dev-infra-down    Stop local infrastructure
 	@echo make migrate-up        Apply PostgreSQL migrations
 	@echo make migrate-down      Roll back PostgreSQL migrations
@@ -68,6 +69,9 @@ api:
 
 worker:
 	cd services/worker && go run ./cmd/worker
+
+worker-docker:
+	$(COMPOSE) up -d --build worker
 
 web:
 	cd apps/web && npm run dev

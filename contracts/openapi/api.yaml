@@ -209,6 +209,8 @@ components:
         - id
         - title
         - status
+        - metadata
+        - failure
         - processing_version
         - created_at
         - updated_at
@@ -223,7 +225,15 @@ components:
           nullable: true
         status:
           type: string
-          enum: [CREATED, UPLOADING, UPLOADED, DELETED]
+          enum: [CREATED, UPLOADING, UPLOADED, QUEUED, PROCESSING, READY, FAILED, DELETED]
+        metadata:
+          allOf:
+            - $ref: '#/components/schemas/VideoMetadata'
+          nullable: true
+        failure:
+          allOf:
+            - $ref: '#/components/schemas/VideoFailure'
+          nullable: true
         processing_version:
           type: integer
         created_at:
@@ -232,6 +242,42 @@ components:
         updated_at:
           type: string
           format: date-time
+    VideoMetadata:
+      type: object
+      properties:
+        duration_ms:
+          type: integer
+          format: int64
+          nullable: true
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        codec:
+          type: string
+          nullable: true
+        container:
+          type: string
+          nullable: true
+        source_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        frame_rate:
+          type: number
+          format: double
+          nullable: true
+    VideoFailure:
+      type: object
+      properties:
+        code:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
     VideoEnvelope:
       type: object
       required: [data]
