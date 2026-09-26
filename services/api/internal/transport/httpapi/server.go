@@ -9,16 +9,19 @@ import (
 
 	"video/services/api/internal/media/application"
 	mediaPostgres "video/services/api/internal/media/infrastructure/postgres"
+	mediaPorts "video/services/api/internal/media/ports"
 	platformauth "video/services/api/internal/platform/auth"
 	"video/services/api/internal/platform/ids"
 	"video/services/api/internal/platform/postgres"
 )
 
 type Server struct {
-	db          postgres.DB
-	videos      VideoService
-	uploads     UploadService
-	currentUser platformauth.CurrentUserProvider
+	db                 postgres.DB
+	videos             VideoService
+	uploads            UploadService
+	currentUser        platformauth.CurrentUserProvider
+	thumbnailSigner    mediaPorts.ThumbnailURLSigner
+	thumbnailURLExpiry time.Duration
 }
 
 func NewServer(db postgres.DB) *http.Server {
@@ -34,10 +37,21 @@ func NewServerWithDependencies(db postgres.DB, videos VideoService, currentUser 
 }
 
 func NewServerWithUploadDependencies(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider) *http.Server {
+	return newServer(db, videos, uploads, currentUser, nil, 15*time.Minute)
+}
+
+func NewServerWithThumbnailDependencies(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider, thumbnailSigner mediaPorts.ThumbnailURLSigner, thumbnailURLExpiry time.Duration) *http.Server {
+	return newServer(db, videos, uploads, currentUser, thumbnailSigner, thumbnailURLExpiry)
+}
+
+func newServer(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider, thumbnailSigner mediaPorts.ThumbnailURLSigner, thumbnailURLExpiry time.Duration) *http.Server {
 	if videos == nil {
 		videos = application.NewService(mediaPostgres.NewRepository(db))
 	}
-	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser}
+	if thumbnailURLExpiry <= 0 {
+		thumbnailURLExpiry = 15 * time.Minute
+	}
+	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser, thumbnailSigner: thumbnailSigner, thumbnailURLExpiry: thumbnailURLExpiry}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)

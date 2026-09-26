@@ -15,6 +15,11 @@ export type VideoFailure = {
   message: string | null;
 };
 
+export type VideoThumbnail = {
+  url: string;
+  expires_at: string;
+};
+
 export type Video = {
   id: string;
   title: string;
@@ -22,6 +27,7 @@ export type Video = {
   status: VideoStatus;
   metadata: VideoMetadata | null;
   failure: VideoFailure | null;
+  thumbnail: VideoThumbnail | null;
   processing_version: number;
   created_at: string;
   updated_at: string;

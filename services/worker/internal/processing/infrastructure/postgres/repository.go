@@ -54,11 +54,11 @@ func (repository *Repository) ClaimQueued(ctx context.Context, operationKey stri
 	return job, true, nil
 }
 
-func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, metadata ports.VideoMetadata, sizeBytes int64, now time.Time) error {
+func (repository *Repository) PersistMetadata(ctx context.Context, job domain.Job, metadata ports.VideoMetadata, sizeBytes int64, now time.Time) error {
 	result, err := repository.db.ExecContext(ctx, `
 		WITH updated_video AS (
 			UPDATE videos
-			SET status = 'READY', source_size_bytes = $3,
+			SET status = 'PROCESSING', source_size_bytes = $3,
 			    source_container = $4, source_codec = $5,
 			    duration_ms = $6, width = $7, height = $8,
 			    frame_rate = $9, failure_code = NULL, failure_message = NULL,
@@ -67,11 +67,50 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 			RETURNING id
 		)
 		UPDATE processing_jobs
-		SET status = 'SUCCEEDED', stage = 'METADATA', finished_at = $10,
-		    error_code = NULL, error_message = NULL, updated_at = $10
-		WHERE id = $1 AND EXISTS (SELECT 1 FROM updated_video)
+		SET stage = 'THUMBNAIL', error_code = NULL, error_message = NULL, updated_at = $10
+		WHERE id = $1 AND status = 'RUNNING' AND EXISTS (SELECT 1 FROM updated_video)
 	`, job.ID, job.VideoID, sizeBytes, metadata.Container, metadata.Codec,
 		metadata.DurationMS, metadata.Width, metadata.Height, metadata.FrameRate, now)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("processing job completion affected no rows")
+	}
+	return nil
+}
+
+func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, asset ports.GeneratedAsset, now time.Time) error {
+	result, err := repository.db.ExecContext(ctx, `
+		WITH persisted_asset AS (
+			INSERT INTO assets (
+				id, video_id, asset_type, variant, object_key,
+				content_type, size_bytes, created_at
+			) VALUES ($2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (video_id, asset_type, variant) DO UPDATE
+			SET object_key = EXCLUDED.object_key,
+			    content_type = EXCLUDED.content_type,
+			    size_bytes = EXCLUDED.size_bytes
+			RETURNING video_id
+		), updated_video AS (
+			UPDATE videos
+			SET status = 'READY', failure_code = NULL, failure_message = NULL,
+			    updated_at = $9
+			WHERE id = $3 AND status = 'PROCESSING'
+			RETURNING id
+		)
+		UPDATE processing_jobs
+		SET status = 'SUCCEEDED', stage = 'THUMBNAIL', finished_at = $9,
+		    error_code = NULL, error_message = NULL, updated_at = $9
+		WHERE id = $1 AND status = 'RUNNING'
+		  AND EXISTS (SELECT 1 FROM persisted_asset)
+		  AND EXISTS (SELECT 1 FROM updated_video)
+	`, job.ID, asset.ID, asset.VideoID, asset.AssetType, asset.Variant,
+		asset.ObjectKey, asset.ContentType, asset.SizeBytes, now)
 	if err != nil {
 		return err
 	}

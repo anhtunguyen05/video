@@ -107,6 +107,10 @@ status
       "height": 1080,
       "codec": "h264"
     },
+    "thumbnail": {
+      "url": "https://minio.example/.../thumbnails/default.jpg?...",
+      "expires_at": "2026-09-26T12:15:00Z"
+    },
     "renditions": [
       {"name": "360p", "status": "READY"},
       {"name": "720p", "status": "READY"},
@@ -123,6 +127,10 @@ Unauthorized owner nên trả:
 ```text
 404 VIDEO_NOT_FOUND
 ```
+
+`thumbnail` is `null` while processing. When available, `url` is a short-lived
+signed GET URL for the private thumbnail object. The API only resolves a
+thumbnail through the authenticated video's owner-scoped record.
 
 ### DELETE /videos/{videoId}
 

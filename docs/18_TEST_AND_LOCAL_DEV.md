@@ -188,7 +188,7 @@ Cùng video/stage/version phải tạo cùng logical identity.
 ### FFmpeg
 - ffprobe valid fixture
 - invalid fixture
-- thumbnail
+- thumbnail generation and aspect-ratio/max-edge rules
 - transcode
 - HLS
 
@@ -215,6 +215,9 @@ HLS
 ↓
 READY
 ```
+
+For the Milestone 5 slice, the acceptance point is `thumbnail` followed by
+`READY`; rendition and HLS steps remain future scope.
 
 ## 10. E2E-002 Invalid media
 

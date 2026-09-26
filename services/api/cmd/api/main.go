@@ -71,7 +71,7 @@ func main() {
 		},
 		publisher,
 	)
-	server := httpapi.NewServerWithUploadDependencies(db, videoService, uploadService, platformauth.StaticPrincipal{ID: cfg.DevUserID})
+	server := httpapi.NewServerWithThumbnailDependencies(db, videoService, uploadService, platformauth.StaticPrincipal{ID: cfg.DevUserID}, storage, cfg.UploadURLExpiry)
 	server.Addr = cfg.HTTPAddr
 	serverErr := make(chan error, 1)
 	go func() {
