@@ -78,11 +78,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "ffprobe", "-version"]
+      test: ["CMD-SHELL", "/usr/bin/ffprobe -version >/dev/null 2>&1 && /usr/bin/ffmpeg -version >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 10s
 
 volumes:
   postgres_data:

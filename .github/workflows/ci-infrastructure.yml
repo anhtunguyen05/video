@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       COMPOSE_FILE: deploy/compose/docker-compose.yml
+      COMPOSE_PROJECT_NAME: video-platform-ci
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,10 +29,19 @@ jobs:
           docker compose -f "$COMPOSE_FILE" config --quiet
 
       - name: Start dependencies
-        run: docker compose -f "$COMPOSE_FILE" up -d --wait --wait-timeout 60
+        run: docker compose -f "$COMPOSE_FILE" up -d --wait --wait-timeout 60 postgres rabbitmq minio
 
       - name: Apply migrations
         run: make migrate-up
+
+      - name: Start worker
+        run: docker compose -f "$COMPOSE_FILE" up -d --wait --wait-timeout 60 worker
+
+      - name: Dump infrastructure diagnostics
+        if: failure()
+        run: |
+          docker compose -f "$COMPOSE_FILE" ps -a
+          docker compose -f "$COMPOSE_FILE" logs --no-color --tail=200 postgres rabbitmq minio worker
 
       - name: API health smoke test
         shell: bash
