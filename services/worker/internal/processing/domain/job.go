@@ -11,7 +11,12 @@ import (
 
 type Status string
 
-const StatusQueued Status = "QUEUED"
+const (
+	StatusQueued    Status = "QUEUED"
+	StatusRunning   Status = "RUNNING"
+	StatusSucceeded Status = "SUCCEEDED"
+	StatusFailed    Status = "FAILED"
+)
 
 var ErrInvalidEvent = errors.New("invalid video uploaded event")
 

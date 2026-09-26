@@ -1,10 +1,27 @@
-export type VideoStatus = "CREATED" | "UPLOADING" | "UPLOADED" | "DELETED";
+export type VideoStatus = "CREATED" | "UPLOADING" | "UPLOADED" | "QUEUED" | "PROCESSING" | "READY" | "FAILED" | "DELETED";
+
+export type VideoMetadata = {
+  duration_ms: number | null;
+  width: number | null;
+  height: number | null;
+  codec: string | null;
+  container: string | null;
+  source_size_bytes: number | null;
+  frame_rate: number | null;
+};
+
+export type VideoFailure = {
+  code: string | null;
+  message: string | null;
+};
 
 export type Video = {
   id: string;
   title: string;
   original_filename: string | null;
   status: VideoStatus;
+  metadata: VideoMetadata | null;
+  failure: VideoFailure | null;
   processing_version: number;
   created_at: string;
   updated_at: string;

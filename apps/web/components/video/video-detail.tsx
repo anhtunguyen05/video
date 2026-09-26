@@ -9,6 +9,22 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+function formatDuration(durationMs: number | null): string {
+  if (durationMs === null) return "Pending";
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatBytes(value: number | null): string {
+  if (value === null) return "Pending";
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+const processingStatuses = new Set<Video["status"]>(["UPLOADED", "QUEUED", "PROCESSING"]);
+
 export function VideoDetail({ videoId }: { videoId: string }) {
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,11 +33,32 @@ export function VideoDetail({ videoId }: { videoId: string }) {
 
   useEffect(() => {
     let active = true;
-    void getVideo(videoId)
-      .then((response) => { if (active) setVideo(response.data); })
-      .catch((loadError: unknown) => { if (active) setError(loadError instanceof Error ? loadError.message : "Unable to load video."); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+
+    async function load() {
+      try {
+        const response = await getVideo(videoId);
+        if (!active) return;
+        setVideo(response.data);
+        setLoading(false);
+        if (processingStatuses.has(response.data.status) && attempts < 30) {
+          attempts += 1;
+          timer = setTimeout(() => void load(), 1000);
+        }
+      } catch (loadError: unknown) {
+        if (active) {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load video.");
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [videoId]);
 
   async function handleDelete() {
@@ -55,7 +92,14 @@ export function VideoDetail({ videoId }: { videoId: string }) {
             <div><dt>Updated</dt><dd>{formatDate(video.updated_at)}</dd></div>
             <div><dt>Processing version</dt><dd>{video.processing_version}</dd></div>
             <div><dt>Video ID</dt><dd className="breakable">{video.id}</dd></div>
+            <div><dt>Duration</dt><dd>{formatDuration(video.metadata?.duration_ms ?? null)}</dd></div>
+            <div><dt>Resolution</dt><dd>{video.metadata?.width && video.metadata?.height ? `${video.metadata.width} × ${video.metadata.height}` : "Pending"}</dd></div>
+            <div><dt>Codec</dt><dd>{video.metadata?.codec ?? "Pending"}</dd></div>
+            <div><dt>Container</dt><dd>{video.metadata?.container ?? "Pending"}</dd></div>
+            <div><dt>Frame rate</dt><dd>{video.metadata?.frame_rate ? `${video.metadata.frame_rate.toFixed(2)} fps` : "Pending"}</dd></div>
+            <div><dt>Source size</dt><dd>{formatBytes(video.metadata?.source_size_bytes ?? null)}</dd></div>
           </dl>
+          {video.failure ? <p className="alert alert-error" role="alert">{video.failure.code}: {video.failure.message}</p> : null}
           {video.status === "CREATED" ? <button className="button button-danger" type="button" disabled={deleting} onClick={() => void handleDelete()}>{deleting ? "Deleting…" : "Delete video"}</button> : null}
         </div>
       ) : null}

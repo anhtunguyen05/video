@@ -50,6 +50,38 @@ services:
       retries: 10
       start_period: 5s
 
+  worker:
+    build:
+      context: ../../services/worker
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minio123}
+      S3_BUCKET: ${S3_BUCKET:-video-platform}
+      S3_USE_PATH_STYLE: ${S3_USE_PATH_STYLE:-true}
+      FFPROBE_PATH: /usr/bin/ffprobe
+      PROCESSING_TEMP_DIR: /tmp/video-processing
+      SHUTDOWN_TIMEOUT_SECONDS: ${SHUTDOWN_TIMEOUT_SECONDS:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ffprobe", "-version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   postgres_data:
   rabbitmq_data:

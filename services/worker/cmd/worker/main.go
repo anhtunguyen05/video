@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -10,12 +11,18 @@ import (
 	"video/services/worker/internal/platform/postgres"
 	"video/services/worker/internal/platform/rabbitmq"
 	processingapplication "video/services/worker/internal/processing/application"
+	"video/services/worker/internal/processing/infrastructure/ffprobe"
 	processingPostgres "video/services/worker/internal/processing/infrastructure/postgres"
+	processingS3 "video/services/worker/internal/processing/infrastructure/s3"
 )
 
 func main() {
 	logger := logging.New()
 	cfg := config.Load()
+	if _, err := exec.LookPath(cfg.FFProbePath); err != nil {
+		logger.Error("ffprobe executable is unavailable", "path", cfg.FFProbePath, "error", err)
+		return
+	}
 	db, err := postgres.Open(cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("open database", "error", err)
@@ -29,7 +36,26 @@ func main() {
 		return
 	}
 	defer consumer.Close()
-	processingService := processingapplication.NewService(processingPostgres.NewRepository(db))
+	processingRepository := processingPostgres.NewRepository(db)
+	storage, err := processingS3.New(
+		cfg.S3Endpoint,
+		cfg.S3Region,
+		cfg.S3AccessKey,
+		cfg.S3SecretKey,
+		cfg.S3Bucket,
+		cfg.S3UsePathStyle,
+	)
+	if err != nil {
+		logger.Error("create object storage client", "error", err)
+		return
+	}
+	processingService := processingapplication.NewProcessingService(
+		processingRepository,
+		processingRepository,
+		storage,
+		ffprobe.NewRunner(cfg.FFProbePath),
+		cfg.ProcessingTempDir,
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

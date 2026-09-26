@@ -90,3 +90,42 @@ func TestGetVideoHidesOtherOwners(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
 }
+
+func TestGetVideoReturnsProcessedMetadata(t *testing.T) {
+	duration := int64(302000)
+	width := 1920
+	height := 1080
+	codec := "h264"
+	container := "mov"
+	size := int64(123456)
+	frameRate := 29.97
+	service := &fakeVideoService{video: domain.Video{
+		ID:                "00000000-0000-4000-8000-000000000002",
+		OwnerID:           "00000000-0000-4000-8000-000000000001",
+		Title:             "Processed",
+		Status:            domain.StatusReady,
+		SourceSizeBytes:   &size,
+		SourceContainer:   &container,
+		SourceCodec:       &codec,
+		DurationMS:        &duration,
+		Width:             &width,
+		Height:            &height,
+		FrameRate:         &frameRate,
+		ProcessingVersion: 1,
+	}}
+	server := NewServerWithDependencies(nil, service, platformauth.StaticPrincipal{ID: "00000000-0000-4000-8000-000000000001"})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/videos/00000000-0000-4000-8000-000000000002", nil)
+	recorder := httptest.NewRecorder()
+
+	server.Handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, expected := range []string{`"status":"READY"`, `"duration_ms":302000`, `"width":1920`, `"height":1080`, `"codec":"h264"`, `"container":"mov"`, `"source_size_bytes":123456`, `"frame_rate":29.97`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("body = %s, missing %s", body, expected)
+		}
+	}
+}

@@ -31,11 +31,12 @@ Docker:
 - PostgreSQL
 - RabbitMQ
 - MinIO
+- Worker with bundled FFmpeg/ffprobe (`make worker-docker`)
 
 Host:
 - Next.js
 - Go API
-- Go Worker
+- Go Worker (optional when the Docker worker is running)
 
 ## 3. Environment
 
@@ -53,6 +54,9 @@ S3_ACCESS_KEY=minio
 S3_SECRET_KEY=minio123
 S3_BUCKET=video-platform
 S3_USE_PATH_STYLE=true
+
+FFPROBE_PATH=ffprobe
+PROCESSING_TEMP_DIR=
 
 SESSION_SECRET=change-me
 LOG_LEVEL=debug
@@ -79,6 +83,15 @@ Worker:
 cd services/worker
 go run ./cmd/worker
 ```
+
+Docker worker with bundled FFmpeg:
+```bash
+make worker-docker
+```
+
+When using the Docker worker, Docker service endpoints are used for
+PostgreSQL, RabbitMQ, and MinIO. The host `FFPROBE_PATH` requirement does
+not apply.
 
 Web:
 ```bash

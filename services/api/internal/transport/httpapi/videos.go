@@ -29,13 +29,30 @@ type createVideoRequest struct {
 }
 
 type videoResponse struct {
-	ID                string  `json:"id"`
-	Title             string  `json:"title"`
-	OriginalFilename  *string `json:"original_filename"`
-	Status            string  `json:"status"`
-	ProcessingVersion int     `json:"processing_version"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
+	ID                string                 `json:"id"`
+	Title             string                 `json:"title"`
+	OriginalFilename  *string                `json:"original_filename"`
+	Status            string                 `json:"status"`
+	Metadata          *videoMetadataResponse `json:"metadata"`
+	Failure           *videoFailureResponse  `json:"failure"`
+	ProcessingVersion int                    `json:"processing_version"`
+	CreatedAt         string                 `json:"created_at"`
+	UpdatedAt         string                 `json:"updated_at"`
+}
+
+type videoMetadataResponse struct {
+	DurationMS      *int64   `json:"duration_ms"`
+	Width           *int     `json:"width"`
+	Height          *int     `json:"height"`
+	Codec           *string  `json:"codec"`
+	Container       *string  `json:"container"`
+	SourceSizeBytes *int64   `json:"source_size_bytes"`
+	FrameRate       *float64 `json:"frame_rate"`
+}
+
+type videoFailureResponse struct {
+	Code    *string `json:"code"`
+	Message *string `json:"message"`
 }
 
 func (s *Server) createVideo(writer http.ResponseWriter, request *http.Request) {
@@ -159,11 +176,29 @@ func decodeJSON(request *http.Request, target any) error {
 }
 
 func toVideoResponse(video domain.Video) videoResponse {
+	var metadata *videoMetadataResponse
+	if video.DurationMS != nil || video.Width != nil || video.Height != nil || video.SourceCodec != nil || video.SourceContainer != nil || video.SourceSizeBytes != nil || video.FrameRate != nil {
+		metadata = &videoMetadataResponse{
+			DurationMS:      video.DurationMS,
+			Width:           video.Width,
+			Height:          video.Height,
+			Codec:           video.SourceCodec,
+			Container:       video.SourceContainer,
+			SourceSizeBytes: video.SourceSizeBytes,
+			FrameRate:       video.FrameRate,
+		}
+	}
+	var failure *videoFailureResponse
+	if video.FailureCode != nil || video.FailureMessage != nil {
+		failure = &videoFailureResponse{Code: video.FailureCode, Message: video.FailureMessage}
+	}
 	return videoResponse{
 		ID:                video.ID,
 		Title:             video.Title,
 		OriginalFilename:  video.OriginalFilename,
 		Status:            string(video.Status),
+		Metadata:          metadata,
+		Failure:           failure,
 		ProcessingVersion: video.ProcessingVersion,
 		CreatedAt:         video.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:         video.UpdatedAt.Format(time.RFC3339Nano),

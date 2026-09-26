@@ -10,10 +10,14 @@ import (
 type Status string
 
 const (
-	StatusCreated   Status = "CREATED"
-	StatusUploading Status = "UPLOADING"
-	StatusUploaded  Status = "UPLOADED"
-	StatusDeleted   Status = "DELETED"
+	StatusCreated    Status = "CREATED"
+	StatusUploading  Status = "UPLOADING"
+	StatusUploaded   Status = "UPLOADED"
+	StatusQueued     Status = "QUEUED"
+	StatusProcessing Status = "PROCESSING"
+	StatusReady      Status = "READY"
+	StatusFailed     Status = "FAILED"
+	StatusDeleted    Status = "DELETED"
 )
 
 var (
@@ -27,6 +31,15 @@ type Video struct {
 	Title             string
 	OriginalFilename  *string
 	Status            Status
+	SourceSizeBytes   *int64
+	SourceContainer   *string
+	SourceCodec       *string
+	DurationMS        *int64
+	Width             *int
+	Height            *int
+	FrameRate         *float64
+	FailureCode       *string
+	FailureMessage    *string
 	ProcessingVersion int
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
