@@ -21,6 +21,8 @@ const (
 	FailureSourceUnreadable = "SOURCE_UNREADABLE"
 	FailureInvalidMedia     = "INVALID_MEDIA_STREAM"
 	FailureThumbnail        = "THUMBNAIL_GENERATION_FAILED"
+	FailureNoRendition      = "NO_SUPPORTED_RENDITION"
+	FailureTranscode        = "RENDITION_TRANSCODE_FAILED"
 )
 
 const DefaultThumbnailMaxEdge = 640
@@ -36,6 +38,7 @@ type Service struct {
 	assets     ports.AssetStorage
 	probe      ports.MetadataProbe
 	thumbnail  ports.ThumbnailGenerator
+	transcoder ports.RenditionTranscoder
 	tempDir    string
 	clock      Clock
 }
@@ -63,11 +66,11 @@ func NewServiceWithClock(repository ports.Repository, clock Clock) *Service {
 	return &Service{repository: repository, clock: clock}
 }
 
-func NewProcessingService(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, tempDir string) *Service {
-	return NewProcessingServiceWithClock(repository, processor, source, assets, probe, thumbnail, tempDir, realClock{})
+func NewProcessingService(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, tempDir string) *Service {
+	return NewProcessingServiceWithClock(repository, processor, source, assets, probe, thumbnail, transcoder, tempDir, realClock{})
 }
 
-func NewProcessingServiceWithClock(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, tempDir string, clock Clock) *Service {
+func NewProcessingServiceWithClock(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, tempDir string, clock Clock) *Service {
 	return &Service{
 		repository: repository,
 		processor:  processor,
@@ -75,6 +78,7 @@ func NewProcessingServiceWithClock(repository ports.Repository, processor ports.
 		assets:     assets,
 		probe:      probe,
 		thumbnail:  thumbnail,
+		transcoder: transcoder,
 		tempDir:    tempDir,
 		clock:      clock,
 	}
@@ -114,7 +118,7 @@ func (service *Service) HandleVideoUploaded(ctx context.Context, body []byte) er
 }
 
 func (service *Service) process(ctx context.Context, job domain.Job) error {
-	if service.source == nil || service.assets == nil || service.probe == nil || service.thumbnail == nil {
+	if service.source == nil || service.assets == nil || service.probe == nil || service.thumbnail == nil || service.transcoder == nil {
 		return errors.New("processing dependencies are not configured")
 	}
 	workDir, err := os.MkdirTemp(service.tempDir, "video-processing-")
@@ -153,6 +157,13 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	if err := service.processor.PersistMetadata(ctx, job, metadata, objectInfo.Size, service.clock.Now()); err != nil {
 		return fmt.Errorf("persist video metadata: %w", err)
 	}
+	renditions, err := domain.PlanRenditions(metadata.Width, metadata.Height)
+	if err != nil {
+		return fmt.Errorf("plan renditions: %w", err)
+	}
+	if len(renditions) == 0 {
+		return service.markFailed(ctx, job, FailureNoRendition, "The uploaded video is too small for the supported rendition ladder.")
+	}
 
 	thumbnailPath := filepath.Join(workDir, "thumbnail.jpg")
 	if err := service.thumbnail.Generate(ctx, sourcePath, thumbnailPath, thumbnailTimestamp(metadata.DurationMS)); err != nil {
@@ -175,7 +186,7 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	if closeThumbnailErr != nil {
 		return fmt.Errorf("close thumbnail file: %w", closeThumbnailErr)
 	}
-	asset := ports.GeneratedAsset{
+	thumbnailAsset := ports.GeneratedAsset{
 		ID:          uuid.NewString(),
 		VideoID:     job.VideoID,
 		AssetType:   "THUMBNAIL",
@@ -184,12 +195,61 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 		ContentType: "image/jpeg",
 		SizeBytes:   thumbnailInfo.Size(),
 	}
-	renditions, err := domain.PlanRenditions(metadata.Width, metadata.Height)
-	if err != nil {
-		return fmt.Errorf("plan renditions: %w", err)
+	if err := service.processor.PrepareTranscoding(ctx, job, thumbnailAsset, renditions, service.clock.Now()); err != nil {
+		return fmt.Errorf("prepare transcoding: %w", err)
 	}
-	if err := service.processor.MarkSucceeded(ctx, job, asset, renditions, service.clock.Now()); err != nil {
+	for _, rendition := range renditions {
+		if err := service.processRendition(ctx, job, sourcePath, workDir, rendition); err != nil {
+			return err
+		}
+	}
+	if err := service.processor.MarkSucceeded(ctx, job, service.clock.Now()); err != nil {
 		return fmt.Errorf("mark processing job succeeded: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) processRendition(ctx context.Context, job domain.Job, sourcePath, workDir string, rendition domain.Rendition) error {
+	if err := service.processor.BeginRendition(ctx, job, rendition, service.clock.Now()); err != nil {
+		return fmt.Errorf("begin rendition %s: %w", rendition.Name, err)
+	}
+	outputPath := filepath.Join(workDir, rendition.Name+".mp4")
+	if err := service.transcoder.Transcode(ctx, ports.RenditionTranscodeRequest{
+		SourcePath: sourcePath,
+		OutputPath: outputPath,
+		Width:      rendition.Width,
+		Height:     rendition.Height,
+	}); err != nil {
+		return service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition could not be generated.")
+	}
+	outputInfo, err := os.Stat(outputPath)
+	if err != nil || outputInfo.Size() <= 0 {
+		return service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output was empty.")
+	}
+	outputFile, err := os.Open(outputPath)
+	if err != nil {
+		return service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output could not be opened.")
+	}
+	objectKey := renditionObjectKey(job, rendition)
+	_, uploadErr := service.assets.Upload(ctx, objectKey, "video/mp4", outputFile, outputInfo.Size())
+	closeErr := outputFile.Close()
+	if uploadErr != nil {
+		return fmt.Errorf("upload rendition %s: %w", rendition.Name, uploadErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close rendition %s: %w", rendition.Name, closeErr)
+	}
+	asset := ports.GeneratedAsset{
+		ID:          uuid.NewString(),
+		VideoID:     job.VideoID,
+		AssetType:   "RENDITION",
+		Variant:     rendition.Name,
+		ObjectKey:   objectKey,
+		ContentType: "video/mp4",
+		SizeBytes:   outputInfo.Size(),
+	}
+	if err := service.processor.CompleteRendition(ctx, job, asset, rendition, service.clock.Now()); err != nil {
+		return fmt.Errorf("complete rendition %s: %w", rendition.Name, err)
 	}
 	return nil
 }
@@ -214,9 +274,20 @@ func thumbnailObjectKey(job domain.Job) string {
 	return fmt.Sprintf("users/%s/videos/%s/thumbnails/default.jpg", job.OwnerID, job.VideoID)
 }
 
+func renditionObjectKey(job domain.Job, rendition domain.Rendition) string {
+	return fmt.Sprintf("users/%s/videos/%s/renditions/%s/video.mp4", job.OwnerID, job.VideoID, rendition.Name)
+}
+
 func (service *Service) markFailed(ctx context.Context, job domain.Job, code, message string) error {
 	if err := service.processor.MarkFailed(ctx, job, code, message, service.clock.Now()); err != nil {
 		return fmt.Errorf("mark processing job failed: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) markRenditionFailed(ctx context.Context, job domain.Job, rendition domain.Rendition, code, message string) error {
+	if err := service.processor.MarkRenditionFailed(ctx, job, rendition, code, message, service.clock.Now()); err != nil {
+		return fmt.Errorf("mark rendition failed: %w", err)
 	}
 	return nil
 }

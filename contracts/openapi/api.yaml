@@ -212,6 +212,7 @@ components:
         - metadata
         - failure
         - thumbnail
+        - renditions
         - processing_version
         - created_at
         - updated_at
@@ -239,6 +240,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/VideoThumbnail'
           nullable: true
+        renditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoRendition'
         processing_version:
           type: integer
         created_at:
@@ -293,6 +298,30 @@ components:
         expires_at:
           type: string
           format: date-time
+    VideoRendition:
+      type: object
+      required: [name, width, height, codec, status, url, expires_at]
+      properties:
+        name:
+          type: string
+          enum: [360p, 720p, 1080p]
+        width:
+          type: integer
+        height:
+          type: integer
+        codec:
+          type: string
+        status:
+          type: string
+          enum: [PLANNED, PROCESSING, READY, FAILED]
+        url:
+          type: string
+          format: uri
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
     VideoEnvelope:
       type: object
       required: [data]

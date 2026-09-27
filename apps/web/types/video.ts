@@ -20,6 +20,16 @@ export type VideoThumbnail = {
   expires_at: string;
 };
 
+export type VideoRendition = {
+  name: "360p" | "720p" | "1080p";
+  width: number;
+  height: number;
+  codec: string;
+  status: "PLANNED" | "PROCESSING" | "READY" | "FAILED";
+  url: string | null;
+  expires_at: string | null;
+};
+
 export type Video = {
   id: string;
   title: string;
@@ -28,6 +38,7 @@ export type Video = {
   metadata: VideoMetadata | null;
   failure: VideoFailure | null;
   thumbnail: VideoThumbnail | null;
+  renditions: VideoRendition[];
   processing_version: number;
   created_at: string;
   updated_at: string;

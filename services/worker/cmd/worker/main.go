@@ -61,6 +61,12 @@ func main() {
 		storage,
 		ffprobe.NewRunner(cfg.FFProbePath),
 		ffmpeg.NewRunner(cfg.FFmpegPath, cfg.ThumbnailMaxEdge),
+		ffmpeg.NewTranscoder(cfg.FFmpegPath, ffmpeg.TranscodeProfile{
+			VideoCodec: cfg.TranscodeVideoCodec,
+			AudioCodec: cfg.TranscodeAudioCodec,
+			Preset:     cfg.TranscodePreset,
+			CRF:        cfg.TranscodeCRF,
+		}),
 		cfg.ProcessingTempDir,
 	)
 

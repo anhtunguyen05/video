@@ -9,20 +9,24 @@ import (
 )
 
 type Config struct {
-	AppEnv            string
-	DatabaseURL       string
-	RabbitMQURL       string
-	S3Endpoint        string
-	S3Region          string
-	S3AccessKey       string
-	S3SecretKey       string
-	S3Bucket          string
-	S3UsePathStyle    bool
-	FFProbePath       string
-	FFmpegPath        string
-	ThumbnailMaxEdge  int
-	ProcessingTempDir string
-	ShutdownTimeout   time.Duration
+	AppEnv              string
+	DatabaseURL         string
+	RabbitMQURL         string
+	S3Endpoint          string
+	S3Region            string
+	S3AccessKey         string
+	S3SecretKey         string
+	S3Bucket            string
+	S3UsePathStyle      bool
+	FFProbePath         string
+	FFmpegPath          string
+	ThumbnailMaxEdge    int
+	TranscodeVideoCodec string
+	TranscodeAudioCodec string
+	TranscodePreset     string
+	TranscodeCRF        int
+	ProcessingTempDir   string
+	ShutdownTimeout     time.Duration
 }
 
 func Load() Config {
@@ -36,26 +40,38 @@ func Load() Config {
 		pathStyle = true
 	}
 	return Config{
-		AppEnv:            getenv("APP_ENV", "local"),
-		DatabaseURL:       getenv("DATABASE_URL", "postgres://video:video@localhost:5432/video?sslmode=disable"),
-		RabbitMQURL:       getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
-		S3Endpoint:        getenv("S3_ENDPOINT", "http://localhost:9000"),
-		S3Region:          getenv("S3_REGION", "us-east-1"),
-		S3AccessKey:       getenv("S3_ACCESS_KEY", "minio"),
-		S3SecretKey:       getenv("S3_SECRET_KEY", "minio123"),
-		S3Bucket:          getenv("S3_BUCKET", "video-platform"),
-		S3UsePathStyle:    pathStyle,
-		FFProbePath:       getenv("FFPROBE_PATH", "ffprobe"),
-		FFmpegPath:        getenv("FFMPEG_PATH", "ffmpeg"),
-		ThumbnailMaxEdge:  positiveInt("THUMBNAIL_MAX_EDGE", 640),
-		ProcessingTempDir: getenv("PROCESSING_TEMP_DIR", ""),
-		ShutdownTimeout:   time.Duration(seconds) * time.Second,
+		AppEnv:              getenv("APP_ENV", "local"),
+		DatabaseURL:         getenv("DATABASE_URL", "postgres://video:video@localhost:5432/video?sslmode=disable"),
+		RabbitMQURL:         getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		S3Endpoint:          getenv("S3_ENDPOINT", "http://localhost:9000"),
+		S3Region:            getenv("S3_REGION", "us-east-1"),
+		S3AccessKey:         getenv("S3_ACCESS_KEY", "minio"),
+		S3SecretKey:         getenv("S3_SECRET_KEY", "minio123"),
+		S3Bucket:            getenv("S3_BUCKET", "video-platform"),
+		S3UsePathStyle:      pathStyle,
+		FFProbePath:         getenv("FFPROBE_PATH", "ffprobe"),
+		FFmpegPath:          getenv("FFMPEG_PATH", "ffmpeg"),
+		ThumbnailMaxEdge:    positiveInt("THUMBNAIL_MAX_EDGE", 640),
+		TranscodeVideoCodec: getenv("TRANSCODE_VIDEO_CODEC", "libx264"),
+		TranscodeAudioCodec: getenv("TRANSCODE_AUDIO_CODEC", "aac"),
+		TranscodePreset:     getenv("TRANSCODE_PRESET", "medium"),
+		TranscodeCRF:        crf("TRANSCODE_CRF", 23),
+		ProcessingTempDir:   getenv("PROCESSING_TEMP_DIR", ""),
+		ShutdownTimeout:     time.Duration(seconds) * time.Second,
 	}
 }
 
 func positiveInt(key string, fallback int) int {
 	value, err := strconv.Atoi(getenv(key, strconv.Itoa(fallback)))
 	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func crf(key string, fallback int) int {
+	value, err := strconv.Atoi(getenv(key, strconv.Itoa(fallback)))
+	if err != nil || value < 0 || value > 51 {
 		return fallback
 	}
 	return value

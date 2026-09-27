@@ -45,12 +45,24 @@ type Video struct {
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
 	Thumbnail         *ThumbnailAsset
+	Renditions        []RenditionAsset
 }
 
 type ThumbnailAsset struct {
 	ObjectKey   string
 	ContentType *string
 	SizeBytes   *int64
+}
+
+type RenditionAsset struct {
+	Name        string  `json:"name"`
+	Width       int     `json:"width"`
+	Height      int     `json:"height"`
+	Codec       string  `json:"codec"`
+	Status      string  `json:"status"`
+	ObjectKey   *string `json:"object_key"`
+	ContentType *string `json:"content_type"`
+	SizeBytes   *int64  `json:"size_bytes"`
 }
 
 func NewVideo(id, ownerID, title string, originalFilename *string, now time.Time) (Video, error) {
