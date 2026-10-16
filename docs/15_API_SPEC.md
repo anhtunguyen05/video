@@ -261,6 +261,12 @@ Failed:
 
 Only valid khi `READY`.
 
+The API serves the master and variant manifests after checking the current
+user owns the video. Master playlist variant references stay on the API
+manifest route; variant playlist segment references are rewritten to private
+object-storage URLs signed for the configured asset URL expiry (15 minutes by
+default). Refresh the playback response when the signed URLs expire.
+
 ## 7. Request ID
 
 Mọi response có:

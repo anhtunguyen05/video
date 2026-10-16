@@ -121,6 +121,11 @@ const videoSelect = `
 			 AND rendition_asset.asset_type = 'RENDITION'
 			 AND rendition_asset.variant = r.name
 			WHERE r.video_id = v.id
+		), '[]'::jsonb),
+		(SELECT object_key FROM assets WHERE video_id = v.id AND asset_type = 'HLS_MASTER' AND variant = 'default' LIMIT 1),
+		COALESCE((
+			SELECT jsonb_agg(jsonb_build_object('variant', variant, 'object_key', object_key) ORDER BY variant)
+			FROM assets WHERE video_id = v.id AND asset_type = 'HLS_VARIANT'
 		), '[]'::jsonb)
 	FROM videos v
 	LEFT JOIN assets a
@@ -151,6 +156,8 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 	var thumbnailContentType sql.NullString
 	var thumbnailSizeBytes sql.NullInt64
 	var renditionJSON []byte
+	var hlsMasterObjectKey sql.NullString
+	var hlsVariantJSON []byte
 	if err := scanner.Scan(
 		&video.ID,
 		&video.OwnerID,
@@ -174,6 +181,8 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 		&thumbnailContentType,
 		&thumbnailSizeBytes,
 		&renditionJSON,
+		&hlsMasterObjectKey,
+		&hlsVariantJSON,
 	); err != nil {
 		return domain.Video{}, err
 	}
@@ -234,6 +243,12 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 	}
 	if err := json.Unmarshal(renditionJSON, &video.Renditions); err != nil {
 		return domain.Video{}, fmt.Errorf("decode renditions: %w", err)
+	}
+	if hlsMasterObjectKey.Valid {
+		video.HLSMaster = &domain.HLSAsset{Variant: "default", ObjectKey: hlsMasterObjectKey.String}
+	}
+	if err := json.Unmarshal(hlsVariantJSON, &video.HLSVariants); err != nil {
+		return domain.Video{}, fmt.Errorf("decode HLS variants: %w", err)
 	}
 	return video, nil
 }

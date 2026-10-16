@@ -54,6 +54,12 @@ func main() {
 		logger.Error("create object storage client", "error", err)
 		return
 	}
+	transcoder := ffmpeg.NewTranscoder(cfg.FFmpegPath, ffmpeg.TranscodeProfile{
+		VideoCodec: cfg.TranscodeVideoCodec,
+		AudioCodec: cfg.TranscodeAudioCodec,
+		Preset:     cfg.TranscodePreset,
+		CRF:        cfg.TranscodeCRF,
+	})
 	processingService := processingapplication.NewProcessingService(
 		processingRepository,
 		processingRepository,
@@ -61,12 +67,8 @@ func main() {
 		storage,
 		ffprobe.NewRunner(cfg.FFProbePath),
 		ffmpeg.NewRunner(cfg.FFmpegPath, cfg.ThumbnailMaxEdge),
-		ffmpeg.NewTranscoder(cfg.FFmpegPath, ffmpeg.TranscodeProfile{
-			VideoCodec: cfg.TranscodeVideoCodec,
-			AudioCodec: cfg.TranscodeAudioCodec,
-			Preset:     cfg.TranscodePreset,
-			CRF:        cfg.TranscodeCRF,
-		}),
+		transcoder,
+		transcoder,
 		cfg.ProcessingTempDir,
 	)
 

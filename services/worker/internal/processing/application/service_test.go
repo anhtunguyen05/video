@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,19 +29,22 @@ func (repository *fakeRepository) CreateQueued(_ context.Context, job domain.Job
 }
 
 type fakeProcessor struct {
-	job          domain.Job
-	claim        bool
-	succeeded    bool
-	metadataDone bool
-	prepared     bool
-	failed       bool
-	metadata     ports.VideoMetadata
-	sizeBytes    int64
-	renditions   []domain.Rendition
-	started      []string
-	completed    []string
-	failureCode  string
-	failureError string
+	job              domain.Job
+	claim            bool
+	succeeded        bool
+	metadataDone     bool
+	prepared         bool
+	failed           bool
+	metadata         ports.VideoMetadata
+	sizeBytes        int64
+	renditions       []domain.Rendition
+	started          []string
+	completed        []string
+	failureCode      string
+	failureError     string
+	packagingStarted bool
+	hlsMaster        ports.GeneratedAsset
+	hlsVariants      []ports.GeneratedAsset
 }
 
 func (processor *fakeProcessor) ClaimQueued(_ context.Context, _ string, _ time.Time) (domain.Job, bool, error) {
@@ -67,6 +71,17 @@ func (processor *fakeProcessor) BeginRendition(_ context.Context, _ domain.Job, 
 
 func (processor *fakeProcessor) CompleteRendition(_ context.Context, _ domain.Job, _ ports.GeneratedAsset, rendition domain.Rendition, _ time.Time) error {
 	processor.completed = append(processor.completed, rendition.Name)
+	return nil
+}
+
+func (processor *fakeProcessor) BeginPackaging(_ context.Context, _ domain.Job, _ time.Time) error {
+	processor.packagingStarted = true
+	return nil
+}
+
+func (processor *fakeProcessor) CompleteHLS(_ context.Context, _ domain.Job, master ports.GeneratedAsset, variants []ports.GeneratedAsset, _ time.Time) error {
+	processor.hlsMaster = master
+	processor.hlsVariants = append([]ports.GeneratedAsset(nil), variants...)
 	return nil
 }
 
@@ -107,11 +122,15 @@ func (storage fakeStorage) Download(_ context.Context, _ string, destination io.
 type fakeAssetStorage struct {
 	content map[string][]byte
 	err     error
+	failKey string
 }
 
 func (storage *fakeAssetStorage) Upload(_ context.Context, objectKey string, _ string, source io.Reader, size int64) (ports.ObjectInfo, error) {
-	if storage.err != nil {
-		return ports.ObjectInfo{}, storage.err
+	if storage.err != nil || storage.failKey == objectKey {
+		if storage.err != nil {
+			return ports.ObjectInfo{}, storage.err
+		}
+		return ports.ObjectInfo{}, errors.New("injected asset upload failure")
 	}
 	content, err := io.ReadAll(source)
 	if err != nil {
@@ -122,6 +141,11 @@ func (storage *fakeAssetStorage) Upload(_ context.Context, objectKey string, _ s
 	}
 	storage.content[objectKey] = content
 	return ports.ObjectInfo{Size: size, ContentType: "image/jpeg"}, nil
+}
+
+func (storage *fakeAssetStorage) Delete(_ context.Context, objectKey string) error {
+	delete(storage.content, objectKey)
+	return nil
 }
 
 type fakeThumbnail struct {
@@ -136,6 +160,18 @@ func (transcoder fakeTranscoder) Transcode(_ context.Context, request ports.Rend
 		return transcoder.err
 	}
 	return os.WriteFile(request.OutputPath, []byte("mp4"), 0o600)
+}
+
+type fakePackager struct{ err error }
+
+func (packager fakePackager) PackageVariant(_ context.Context, request ports.HLSVariantRequest) error {
+	if packager.err != nil {
+		return packager.err
+	}
+	if err := os.WriteFile(filepath.Join(request.OutputDir, "index.m3u8"), []byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:1.5,\nsegment_00000.ts\n#EXT-X-ENDLIST\n"), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(request.OutputDir, "segment_00000.ts"), []byte("segment"), 0o600)
 }
 
 func (thumbnail *fakeThumbnail) Generate(_ context.Context, _ string, outputPath string, timestamp time.Duration) error {
@@ -155,6 +191,7 @@ func newThumbnailService(repository *fakeRepository, processor *fakeProcessor, s
 		probe,
 		&fakeThumbnail{},
 		fakeTranscoder{},
+		fakePackager{},
 		tempDir,
 	)
 }
@@ -212,6 +249,7 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 		fakeProbe{metadata: metadata},
 		thumbnail,
 		fakeTranscoder{},
+		fakePackager{},
 		t.TempDir(),
 		fixedClock{now: time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)},
 	)
@@ -220,8 +258,11 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleVideoUploaded() error = %v", err)
 	}
-	if !processor.metadataDone || !processor.prepared || !processor.succeeded || processor.sizeBytes != 5 || processor.metadata != metadata {
+	if !processor.metadataDone || !processor.prepared || !processor.packagingStarted || !processor.succeeded || processor.sizeBytes != 5 || processor.metadata != metadata {
 		t.Fatalf("unexpected successful processing: %#v", processor)
+	}
+	if processor.hlsMaster.AssetType != "HLS_MASTER" || len(processor.hlsVariants) != 3 {
+		t.Fatalf("unexpected persisted HLS assets: master=%#v variants=%#v", processor.hlsMaster, processor.hlsVariants)
 	}
 	if want := []domain.Rendition{
 		{Name: "360p", Width: 640, Height: 360, Codec: domain.PlannedRenditionCodec},
@@ -232,6 +273,9 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 	}
 	if thumbnail.timestamp != 150*time.Millisecond || string(assets.content["users/owner-1/videos/video-1/thumbnails/default.jpg"]) != "jpeg" {
 		t.Fatalf("unexpected thumbnail output: timestamp=%s content=%q", thumbnail.timestamp, assets.content)
+	}
+	if string(assets.content["users/owner-1/videos/video-1/hls/master.m3u8"]) == "" || string(assets.content["users/owner-1/videos/video-1/hls/360p/index.m3u8"]) == "" || string(assets.content["users/owner-1/videos/video-1/hls/360p/segment_00000.ts"]) != "segment" {
+		t.Fatalf("HLS output was not uploaded: keys=%v", assets.content)
 	}
 	if want := []string{"360p", "720p", "1080p"}; !reflect.DeepEqual(processor.started, want) || !reflect.DeepEqual(processor.completed, want) {
 		t.Fatalf("rendition order started=%#v completed=%#v, want %#v", processor.started, processor.completed, want)
@@ -284,7 +328,7 @@ func TestHandleVideoUploadedRejectsSourceWithoutSupportedRendition(t *testing.T)
 	}
 	service := NewProcessingService(
 		&fakeRepository{}, processor, fakeStorage{content: []byte("video")}, &fakeAssetStorage{},
-		fakeProbe{metadata: ports.VideoMetadata{Width: 320, Height: 568}}, &fakeThumbnail{}, fakeTranscoder{}, t.TempDir(),
+		fakeProbe{metadata: ports.VideoMetadata{Width: 320, Height: 568}}, &fakeThumbnail{}, fakeTranscoder{}, fakePackager{}, t.TempDir(),
 	)
 
 	err := service.HandleVideoUploaded(context.Background(), []byte(`{"message_type":"video.uploaded.v1","schema_version":1,"payload":{"video_id":"video-1","owner_id":"owner-1","source_object_key":"source.mp4","processing_version":1}}`))
@@ -303,15 +347,48 @@ func TestHandleVideoUploadedMarksTranscodeFailure(t *testing.T) {
 	}
 	service := NewProcessingService(
 		&fakeRepository{}, processor, fakeStorage{content: []byte("video")}, &fakeAssetStorage{},
-		fakeProbe{metadata: ports.VideoMetadata{Width: 640, Height: 360}}, &fakeThumbnail{}, fakeTranscoder{err: errors.New("ffmpeg failed")}, t.TempDir(),
+		fakeProbe{metadata: ports.VideoMetadata{Width: 640, Height: 360}}, &fakeThumbnail{}, fakeTranscoder{err: errors.New("ffmpeg failed")}, fakePackager{}, t.TempDir(),
 	)
 
 	err := service.HandleVideoUploaded(context.Background(), []byte(`{"message_type":"video.uploaded.v1","schema_version":1,"payload":{"video_id":"video-1","owner_id":"owner-1","source_object_key":"source.mp4","processing_version":1}}`))
 	if err != nil {
 		t.Fatalf("HandleVideoUploaded() error = %v", err)
 	}
-	if !processor.failed || processor.failureCode != FailureTranscode || !reflect.DeepEqual(processor.started, []string{"360p"}) {
+	if !processor.failed || processor.succeeded || processor.failureCode != FailureTranscode || processor.packagingStarted || !reflect.DeepEqual(processor.started, []string{"360p"}) {
 		t.Fatalf("unexpected transcode failure: %#v", processor)
+	}
+}
+
+func TestBuildMasterPlaylistReferencesEachVariant(t *testing.T) {
+	playlist := string(buildMasterPlaylist([]ports.HLSVariant{
+		{Name: "360p", Width: 640, Height: 360, Bandwidth: 450000},
+		{Name: "720p", Width: 1280, Height: 720, Bandwidth: 1200000},
+	}))
+	for _, expected := range []string{"#EXTM3U", "BANDWIDTH=450000,RESOLUTION=640x360", "360p/index.m3u8", "BANDWIDTH=1200000,RESOLUTION=1280x720", "720p/index.m3u8"} {
+		if !strings.Contains(playlist, expected) {
+			t.Fatalf("master playlist %q missing %q", playlist, expected)
+		}
+	}
+}
+
+func TestHandleVideoUploadedMarksHLSFailureAndCleansPartialObjects(t *testing.T) {
+	processor := &fakeProcessor{claim: true, job: domain.Job{ID: "job-1", VideoID: "video-1", OwnerID: "owner-1", SourceObjectKey: "source.mp4", ProcessingVersion: 1}}
+	assets := &fakeAssetStorage{failKey: "users/owner-1/videos/video-1/hls/360p/segment_00000.ts"}
+	service := NewProcessingService(
+		&fakeRepository{}, processor, fakeStorage{content: []byte("video")}, assets,
+		fakeProbe{metadata: ports.VideoMetadata{DurationMS: 6000, Width: 640, Height: 360}}, &fakeThumbnail{}, fakeTranscoder{}, fakePackager{}, t.TempDir(),
+	)
+	err := service.HandleVideoUploaded(context.Background(), []byte(`{"message_type":"video.uploaded.v1","schema_version":1,"payload":{"video_id":"video-1","owner_id":"owner-1","source_object_key":"source.mp4","processing_version":1}}`))
+	if err != nil {
+		t.Fatalf("HandleVideoUploaded() error = %v", err)
+	}
+	if !processor.failed || processor.failureCode != FailureHLSPackaging || processor.succeeded {
+		t.Fatalf("unexpected packaging result: %#v", processor)
+	}
+	for key := range assets.content {
+		if strings.Contains(key, "/hls/") {
+			t.Fatalf("partial HLS object %q was not cleaned", key)
+		}
 	}
 }
 

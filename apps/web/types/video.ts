@@ -51,6 +51,8 @@ export type VideoList = {
 
 export type VideoEnvelope = { data: Video };
 export type VideoListEnvelope = { data: VideoList };
+export type PlaybackSession = { type: "hls"; url: string; expires_at: string };
+export type PlaybackEnvelope = { data: PlaybackSession };
 
 export type CreateVideoInput = {
   title: string;

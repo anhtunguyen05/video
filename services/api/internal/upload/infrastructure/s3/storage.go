@@ -82,6 +82,26 @@ func (storage *Storage) PresignAsset(ctx context.Context, objectKey string, expi
 	return presigned.String(), time.Now().UTC().Add(expiry), nil
 }
 
+func (storage *Storage) ReadAsset(ctx context.Context, objectKey string) ([]byte, error) {
+	object, err := storage.client.GetObject(ctx, storage.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, mapStorageError(err)
+	}
+	defer object.Close()
+	if _, err := object.Stat(); err != nil {
+		return nil, mapStorageError(err)
+	}
+	const maxPlaylistSize = 1 << 20
+	data, err := io.ReadAll(io.LimitReader(object, maxPlaylistSize+1))
+	if err != nil {
+		return nil, mapStorageError(err)
+	}
+	if len(data) > maxPlaylistSize {
+		return nil, errors.New("HLS playlist exceeds maximum size")
+	}
+	return data, nil
+}
+
 func (storage *Storage) StatObject(ctx context.Context, objectKey string) (ports.ObjectInfo, error) {
 	info, err := storage.client.StatObject(ctx, storage.bucket, objectKey, minio.StatObjectOptions{})
 	if err != nil {

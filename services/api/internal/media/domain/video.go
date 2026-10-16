@@ -46,6 +46,8 @@ type Video struct {
 	DeletedAt         *time.Time
 	Thumbnail         *ThumbnailAsset
 	Renditions        []RenditionAsset
+	HLSMaster         *HLSAsset
+	HLSVariants       []HLSAsset
 }
 
 type ThumbnailAsset struct {
@@ -63,6 +65,11 @@ type RenditionAsset struct {
 	ObjectKey   *string `json:"object_key"`
 	ContentType *string `json:"content_type"`
 	SizeBytes   *int64  `json:"size_bytes"`
+}
+
+type HLSAsset struct {
+	Variant   string `json:"variant"`
+	ObjectKey string `json:"object_key"`
 }
 
 func NewVideo(id, ownerID, title string, originalFilename *string, now time.Time) (Video, error) {

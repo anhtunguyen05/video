@@ -21,6 +21,7 @@ type Server struct {
 	uploads        UploadService
 	currentUser    platformauth.CurrentUserProvider
 	assetSigner    mediaPorts.AssetURLSigner
+	assetReader    mediaPorts.AssetObjectReader
 	assetURLExpiry time.Duration
 }
 
@@ -51,13 +52,19 @@ func newServer(db postgres.DB, videos VideoService, uploads UploadService, curre
 	if assetURLExpiry <= 0 {
 		assetURLExpiry = 15 * time.Minute
 	}
-	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser, assetSigner: assetSigner, assetURLExpiry: assetURLExpiry}
+	var assetReader mediaPorts.AssetObjectReader
+	if reader, ok := assetSigner.(mediaPorts.AssetObjectReader); ok {
+		assetReader = reader
+	}
+	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser, assetSigner: assetSigner, assetReader: assetReader, assetURLExpiry: assetURLExpiry}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)
 	mux.HandleFunc("POST /api/v1/videos", api.createVideo)
 	mux.HandleFunc("GET /api/v1/videos", api.listVideos)
 	mux.HandleFunc("GET /api/v1/videos/{videoId}", api.getVideo)
+	mux.HandleFunc("GET /api/v1/videos/{videoId}/playback", api.getPlayback)
+	mux.HandleFunc("GET /api/v1/videos/{videoId}/playback/hls/{manifestPath...}", api.getHLSManifest)
 	mux.HandleFunc("DELETE /api/v1/videos/{videoId}", api.deleteVideo)
 	mux.HandleFunc("POST /api/v1/videos/{videoId}/uploads", api.createUpload)
 	mux.HandleFunc("POST /api/v1/uploads/{uploadId}/complete", api.completeUpload)

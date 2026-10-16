@@ -174,6 +174,70 @@ func (repository *Repository) CompleteRendition(ctx context.Context, job domain.
 	return expectOneRow(result)
 }
 
+func (repository *Repository) BeginPackaging(ctx context.Context, job domain.Job, now time.Time) error {
+	result, err := repository.db.ExecContext(ctx, `
+		UPDATE processing_jobs
+		SET stage = 'PACKAGING', updated_at = $3
+		WHERE id = $1 AND status = 'RUNNING' AND stage = 'TRANSCODING'
+		  AND EXISTS (SELECT 1 FROM renditions WHERE video_id = $2)
+		  AND NOT EXISTS (SELECT 1 FROM renditions WHERE video_id = $2 AND status <> 'READY')
+	`, job.ID, job.VideoID, now)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(result)
+}
+
+func (repository *Repository) CompleteHLS(ctx context.Context, job domain.Job, master ports.GeneratedAsset, variants []ports.GeneratedAsset, now time.Time) error {
+	if len(variants) == 0 {
+		return errors.New("HLS variants are required")
+	}
+	type hlsVariantRow struct {
+		ID          string `json:"id"`
+		Variant     string `json:"variant"`
+		ObjectKey   string `json:"object_key"`
+		ContentType string `json:"content_type"`
+		SizeBytes   int64  `json:"size_bytes"`
+	}
+	variantRows := make([]hlsVariantRow, 0, len(variants))
+	for _, asset := range variants {
+		variantRows = append(variantRows, hlsVariantRow{ID: asset.ID, Variant: asset.Variant, ObjectKey: asset.ObjectKey, ContentType: asset.ContentType, SizeBytes: asset.SizeBytes})
+	}
+	encoded, err := json.Marshal(variantRows)
+	if err != nil {
+		return err
+	}
+	result, err := repository.db.ExecContext(ctx, `
+		WITH eligible_job AS (
+			SELECT id FROM processing_jobs WHERE id = $1 AND status = 'RUNNING' AND stage = 'PACKAGING'
+		), persisted_master AS (
+			INSERT INTO assets (id, video_id, asset_type, variant, object_key, content_type, size_bytes, created_at)
+			SELECT $2, $3, 'HLS_MASTER', 'default', $4, $5, $6, $7
+			WHERE EXISTS (SELECT 1 FROM eligible_job)
+			ON CONFLICT (video_id, asset_type, variant) DO UPDATE
+			SET object_key = EXCLUDED.object_key, content_type = EXCLUDED.content_type, size_bytes = EXCLUDED.size_bytes
+			RETURNING video_id
+		), persisted_variants AS (
+			INSERT INTO assets (id, video_id, asset_type, variant, object_key, content_type, size_bytes, created_at)
+			SELECT item.id::uuid, $3, 'HLS_VARIANT', item.variant, item.object_key, item.content_type, item.size_bytes, $7
+			FROM jsonb_to_recordset($8::jsonb) AS item(id text, variant text, object_key text, content_type text, size_bytes bigint)
+			WHERE EXISTS (SELECT 1 FROM eligible_job)
+			ON CONFLICT (video_id, asset_type, variant) DO UPDATE
+			SET object_key = EXCLUDED.object_key, content_type = EXCLUDED.content_type, size_bytes = EXCLUDED.size_bytes
+			RETURNING video_id
+		)
+		UPDATE processing_jobs
+		SET updated_at = $7
+		WHERE id = $1 AND status = 'RUNNING' AND stage = 'PACKAGING'
+		  AND EXISTS (SELECT 1 FROM persisted_master)
+		  AND (SELECT count(*) FROM persisted_variants) = $9
+	`, job.ID, master.ID, job.VideoID, master.ObjectKey, master.ContentType, master.SizeBytes, now, string(encoded), len(variants))
+	if err != nil {
+		return err
+	}
+	return expectOneRow(result)
+}
+
 func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, now time.Time) error {
 	result, err := repository.db.ExecContext(ctx, `
 		WITH ready_renditions AS (
@@ -183,12 +247,15 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 			UPDATE videos
 			SET status = 'READY', failure_code = NULL, failure_message = NULL, updated_at = $3
 			WHERE id = $2 AND status = 'PROCESSING'
+			  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $1 AND status = 'RUNNING' AND stage = 'PACKAGING')
 			  AND (SELECT total > 0 AND total = ready FROM ready_renditions)
+			  AND EXISTS (SELECT 1 FROM assets WHERE video_id = $2 AND asset_type = 'HLS_MASTER' AND variant = 'default')
+			  AND (SELECT count(*) FROM assets WHERE video_id = $2 AND asset_type = 'HLS_VARIANT') = (SELECT ready FROM ready_renditions)
 			RETURNING id
 		)
 		UPDATE processing_jobs
 		SET status = 'SUCCEEDED', finished_at = $3, error_code = NULL, error_message = NULL, updated_at = $3
-		WHERE id = $1 AND status = 'RUNNING' AND stage = 'TRANSCODING'
+		WHERE id = $1 AND status = 'RUNNING' AND stage = 'PACKAGING'
 		  AND EXISTS (SELECT 1 FROM updated_video)
 	`, job.ID, job.VideoID, now)
 	if err != nil {

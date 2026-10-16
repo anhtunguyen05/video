@@ -139,5 +139,32 @@ func (runner *Runner) Transcode(ctx context.Context, request ports.RenditionTran
 	return nil
 }
 
+func (runner *Runner) PackageVariant(ctx context.Context, request ports.HLSVariantRequest) error {
+	if strings.TrimSpace(request.InputPath) == "" || strings.TrimSpace(request.OutputDir) == "" {
+		return fmt.Errorf("input and output paths are required")
+	}
+	playlistPath := request.OutputDir + "/index.m3u8"
+	segmentPattern := request.OutputDir + "/segment_%05d.ts"
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-i", request.InputPath,
+		"-map", "0:v:0", "-map", "0:a:0?",
+		"-c", "copy",
+		"-f", "hls", "-hls_time", "6", "-hls_playlist_type", "vod",
+		"-hls_segment_type", "mpegts", "-hls_segment_filename", segmentPattern,
+		playlistPath,
+	}
+	output, err := runner.run.Run(ctx, runner.path, args...)
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("ffmpeg HLS packaging failed: %s", message)
+	}
+	return nil
+}
+
 var _ ports.ThumbnailGenerator = (*Runner)(nil)
 var _ ports.RenditionTranscoder = (*Runner)(nil)
+var _ ports.HLSVariantPackager = (*Runner)(nil)

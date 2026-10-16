@@ -263,16 +263,27 @@ Generated rendition có thể tải và phát được.
 
 ## 10. Milestone 8 — HLS
 
-Generate:
+Package the MP4 renditions from Milestone 7 without re-encoding. Use MPEG-TS
+segments with a six-second target and VOD playlists. Persist one `HLS_MASTER`
+asset and one `HLS_VARIANT` asset per rendition; keep segment objects private
+without creating a database row for each segment.
+
+Object keys:
 ```text
-hls/
-├── master.m3u8
-├── 360p/
-├── 720p/
-└── 1080p/
+users/{owner_id}/videos/{video_id}/hls/master.m3u8
+users/{owner_id}/videos/{video_id}/hls/{quality}/index.m3u8
+users/{owner_id}/videos/{video_id}/hls/{quality}/segment_00000.ts
 ```
 
-Frontend dùng HLS player.
+`GET /videos/{videoId}/playback` returns a short-lived playback response whose
+manifest URL is served by the authenticated API. The API rewrites variant
+playlists and signs segment URLs after checking ownership. The web player uses
+native HLS when supported and `hls.js` otherwise.
+
+Only mark the video `READY` after the master playlist, every expected variant,
+and all referenced segments have been uploaded and their playlist assets have
+been persisted. Packaging failure marks the processing job/video `FAILED` and
+best-effort deletes uploaded HLS objects. Retry and DLQ remain Milestone 9.
 
 ### Done when
 Video `READY` có thể phát trên browser bằng HLS.

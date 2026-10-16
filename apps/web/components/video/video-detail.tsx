@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { deleteVideo, getVideo } from "@/lib/api/client";
+import { deleteVideo, getPlayback, getVideo } from "@/lib/api/client";
 import type { Video } from "@/types/video";
+import { HlsPlayer } from "@/components/video/hls-player";
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -30,6 +31,8 @@ export function VideoDetail({ videoId }: { videoId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [playbackURL, setPlaybackURL] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +63,29 @@ export function VideoDetail({ videoId }: { videoId: string }) {
       if (timer) clearTimeout(timer);
     };
   }, [videoId]);
+
+  async function refreshPlayback() {
+    setPlaybackError(null);
+    try {
+      const playback = await getPlayback(videoId);
+      setPlaybackURL(playback.data.url);
+    } catch (loadError: unknown) {
+      setPlaybackURL(null);
+      setPlaybackError(loadError instanceof Error ? loadError.message : "Unable to load playback.");
+    }
+  }
+
+  useEffect(() => {
+    if (video?.status !== "READY") return;
+    let active = true;
+    getPlayback(videoId).then((playback) => {
+      if (active) setPlaybackURL(playback.data.url);
+    }).catch((loadError: unknown) => {
+      if (!active) return;
+      setPlaybackError(loadError instanceof Error ? loadError.message : "Unable to load playback.");
+    });
+    return () => { active = false; };
+  }, [video?.status, videoId]);
 
   async function handleDelete() {
     if (!video || !window.confirm(`Delete “${video.title}”?`)) return;
@@ -94,6 +120,13 @@ export function VideoDetail({ videoId }: { videoId: string }) {
           ) : (
             <div className="thumbnail-placeholder" aria-live="polite">Thumbnail pending</div>
           )}
+          {video.status === "READY" ? (
+            <section className="rendition-section" aria-labelledby="playback-heading">
+              <h2 id="playback-heading">HLS playback</h2>
+              {playbackError ? <p className="alert alert-error" role="alert">{playbackError}</p> : null}
+              {playbackURL ? <HlsPlayer src={playbackURL} onRefresh={() => void refreshPlayback()} /> : !playbackError ? <p className="muted" aria-live="polite">Preparing playback…</p> : null}
+            </section>
+          ) : null}
           {video.renditions.length > 0 ? (
             <section className="rendition-section" aria-labelledby="renditions-heading">
               <h2 id="renditions-heading">MP4 renditions</h2>
@@ -106,9 +139,6 @@ export function VideoDetail({ videoId }: { videoId: string }) {
                     </div>
                     {rendition.status === "READY" && rendition.url ? (
                       <>
-                        <video className="rendition-video" controls preload="metadata" src={rendition.url}>
-                          Your browser cannot play this MP4 rendition.
-                        </video>
                         <a className="text-link" href={rendition.url} download>Download {rendition.name} MP4</a>
                       </>
                     ) : <p className="muted">Rendition is not available yet.</p>}
