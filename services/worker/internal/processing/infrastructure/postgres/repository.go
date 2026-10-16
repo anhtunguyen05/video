@@ -86,7 +86,7 @@ func (repository *Repository) PersistMetadata(ctx context.Context, job domain.Jo
 	return nil
 }
 
-func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, asset ports.GeneratedAsset, renditions []domain.Rendition, now time.Time) error {
+func (repository *Repository) PrepareTranscoding(ctx context.Context, job domain.Job, asset ports.GeneratedAsset, renditions []domain.Rendition, now time.Time) error {
 	plannedRenditions, err := json.Marshal(newPlannedRenditions(renditions))
 	if err != nil {
 		return err
@@ -107,30 +107,23 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 				id, video_id, name, width, height, codec, status, created_at, updated_at
 			)
 			SELECT planned.id::uuid, $3, planned.name, planned.width, planned.height,
-			       planned.codec, 'PLANNED', $9, $9
+				planned.codec, 'PLANNED', $9, $9
 			FROM jsonb_to_recordset($10::jsonb)
 			     AS planned(id text, name text, width integer, height integer, codec text)
 			ON CONFLICT (video_id, name) DO UPDATE
 			SET width = EXCLUDED.width,
 			    height = EXCLUDED.height,
 			    codec = EXCLUDED.codec,
-			    status = 'PLANNED',
-			    object_prefix = NULL,
-			    updated_at = EXCLUDED.updated_at
+				status = 'PLANNED',
+				object_prefix = NULL,
+				updated_at = EXCLUDED.updated_at
 			RETURNING video_id
-		), updated_video AS (
-			UPDATE videos
-			SET status = 'READY', failure_code = NULL, failure_message = NULL,
-			    updated_at = $9
-			WHERE id = $3 AND status = 'PROCESSING'
-			RETURNING id
 		)
 		UPDATE processing_jobs
-		SET status = 'SUCCEEDED', stage = 'RENDITION_PLANNING', finished_at = $9,
-		    error_code = NULL, error_message = NULL, updated_at = $9
+		SET stage = 'TRANSCODING', error_code = NULL, error_message = NULL, updated_at = $9
 		WHERE id = $1 AND status = 'RUNNING'
 		  AND EXISTS (SELECT 1 FROM persisted_asset)
-		  AND EXISTS (SELECT 1 FROM updated_video)
+		  AND EXISTS (SELECT 1 FROM persisted_renditions)
 	`, job.ID, asset.ID, asset.VideoID, asset.AssetType, asset.Variant,
 		asset.ObjectKey, asset.ContentType, asset.SizeBytes, now, string(plannedRenditions))
 	if err != nil {
@@ -144,6 +137,85 @@ func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job,
 		return errors.New("processing job completion affected no rows")
 	}
 	return nil
+}
+
+func (repository *Repository) BeginRendition(ctx context.Context, job domain.Job, rendition domain.Rendition, now time.Time) error {
+	result, err := repository.db.ExecContext(ctx, `
+		UPDATE renditions
+		SET status = 'PROCESSING', updated_at = $4
+		WHERE video_id = $1 AND name = $2 AND status = 'PLANNED'
+		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $3 AND status = 'RUNNING' AND stage = 'TRANSCODING')
+	`, job.VideoID, rendition.Name, job.ID, now)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(result)
+}
+
+func (repository *Repository) CompleteRendition(ctx context.Context, job domain.Job, asset ports.GeneratedAsset, rendition domain.Rendition, now time.Time) error {
+	result, err := repository.db.ExecContext(ctx, `
+		WITH persisted_asset AS (
+			INSERT INTO assets (id, video_id, asset_type, variant, object_key, content_type, size_bytes, created_at)
+			VALUES ($1, $2, 'RENDITION', $3, $4, $5, $6, $7)
+			ON CONFLICT (video_id, asset_type, variant) DO UPDATE
+			SET object_key = EXCLUDED.object_key, content_type = EXCLUDED.content_type, size_bytes = EXCLUDED.size_bytes
+			RETURNING video_id
+		)
+		UPDATE renditions
+		SET status = 'READY', object_prefix = $8, updated_at = $7
+		WHERE video_id = $2 AND name = $3 AND status = 'PROCESSING'
+		  AND EXISTS (SELECT 1 FROM persisted_asset)
+		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $9 AND status = 'RUNNING' AND stage = 'TRANSCODING')
+	`, asset.ID, asset.VideoID, rendition.Name, asset.ObjectKey, asset.ContentType, asset.SizeBytes, now,
+		renditionObjectPrefix(job, rendition), job.ID)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(result)
+}
+
+func (repository *Repository) MarkSucceeded(ctx context.Context, job domain.Job, now time.Time) error {
+	result, err := repository.db.ExecContext(ctx, `
+		WITH ready_renditions AS (
+			SELECT count(*) AS total, count(*) FILTER (WHERE status = 'READY') AS ready
+			FROM renditions WHERE video_id = $2
+		), updated_video AS (
+			UPDATE videos
+			SET status = 'READY', failure_code = NULL, failure_message = NULL, updated_at = $3
+			WHERE id = $2 AND status = 'PROCESSING'
+			  AND (SELECT total > 0 AND total = ready FROM ready_renditions)
+			RETURNING id
+		)
+		UPDATE processing_jobs
+		SET status = 'SUCCEEDED', finished_at = $3, error_code = NULL, error_message = NULL, updated_at = $3
+		WHERE id = $1 AND status = 'RUNNING' AND stage = 'TRANSCODING'
+		  AND EXISTS (SELECT 1 FROM updated_video)
+	`, job.ID, job.VideoID, now)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(result)
+}
+
+func (repository *Repository) MarkRenditionFailed(ctx context.Context, job domain.Job, rendition domain.Rendition, code, message string, now time.Time) error {
+	result, err := repository.db.ExecContext(ctx, `
+		WITH failed_rendition AS (
+			UPDATE renditions SET status = 'FAILED', updated_at = $5
+			WHERE video_id = $2 AND name = $3 AND status = 'PROCESSING'
+			RETURNING video_id
+		), failed_video AS (
+			UPDATE videos SET status = 'FAILED', failure_code = $4, failure_message = $6, updated_at = $5
+			WHERE id = $2 AND status = 'PROCESSING' AND EXISTS (SELECT 1 FROM failed_rendition)
+			RETURNING id
+		)
+		UPDATE processing_jobs
+		SET status = 'FAILED', error_code = $4, error_message = $6, finished_at = $5, updated_at = $5
+		WHERE id = $1 AND status = 'RUNNING' AND EXISTS (SELECT 1 FROM failed_video)
+	`, job.ID, job.VideoID, rendition.Name, code, now, message)
+	if err != nil {
+		return err
+	}
+	return expectOneRow(result)
 }
 
 type plannedRendition struct {
@@ -166,6 +238,21 @@ func newPlannedRenditions(renditions []domain.Rendition) []plannedRendition {
 		})
 	}
 	return planned
+}
+
+func renditionObjectPrefix(job domain.Job, rendition domain.Rendition) string {
+	return "users/" + job.OwnerID + "/videos/" + job.VideoID + "/renditions/" + rendition.Name
+}
+
+func expectOneRow(result sql.Result) error {
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("processing job completion affected no rows")
+	}
+	return nil
 }
 
 func (repository *Repository) MarkFailed(ctx context.Context, job domain.Job, code, message string, now time.Time) error {

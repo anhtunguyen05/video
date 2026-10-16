@@ -94,6 +94,29 @@ export function VideoDetail({ videoId }: { videoId: string }) {
           ) : (
             <div className="thumbnail-placeholder" aria-live="polite">Thumbnail pending</div>
           )}
+          {video.renditions.length > 0 ? (
+            <section className="rendition-section" aria-labelledby="renditions-heading">
+              <h2 id="renditions-heading">MP4 renditions</h2>
+              <div className="rendition-list">
+                {video.renditions.map((rendition) => (
+                  <article className="rendition-card" key={rendition.name}>
+                    <div className="rendition-heading">
+                      <div><h3>{rendition.name}</h3><p>{rendition.width} × {rendition.height} · {rendition.codec}</p></div>
+                      <span className={`status status-${rendition.status.toLowerCase()}`}>{rendition.status}</span>
+                    </div>
+                    {rendition.status === "READY" && rendition.url ? (
+                      <>
+                        <video className="rendition-video" controls preload="metadata" src={rendition.url}>
+                          Your browser cannot play this MP4 rendition.
+                        </video>
+                        <a className="text-link" href={rendition.url} download>Download {rendition.name} MP4</a>
+                      </>
+                    ) : <p className="muted">Rendition is not available yet.</p>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <dl className="metadata-grid">
             <div><dt>Original filename</dt><dd>{video.original_filename ?? "Not provided"}</dd></div>
             <div><dt>Created</dt><dd>{formatDate(video.created_at)}</dd></div>

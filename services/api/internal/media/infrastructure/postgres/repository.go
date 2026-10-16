@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -105,7 +106,22 @@ const videoSelect = `
 	       source_size_bytes, source_container, source_codec, duration_ms,
 	       width, height, frame_rate, failure_code, failure_message,
 	       v.processing_version, v.created_at, v.updated_at, v.deleted_at,
-	       a.object_key, a.content_type, a.size_bytes
+	       a.object_key, a.content_type, a.size_bytes,
+	       COALESCE((
+			SELECT jsonb_agg(jsonb_build_object(
+				'name', r.name, 'width', r.width, 'height', r.height,
+				'codec', r.codec, 'status', r.status,
+				'object_key', rendition_asset.object_key,
+				'content_type', rendition_asset.content_type,
+				'size_bytes', rendition_asset.size_bytes
+			) ORDER BY r.name)
+			FROM renditions r
+			LEFT JOIN assets rendition_asset
+			  ON rendition_asset.video_id = r.video_id
+			 AND rendition_asset.asset_type = 'RENDITION'
+			 AND rendition_asset.variant = r.name
+			WHERE r.video_id = v.id
+		), '[]'::jsonb)
 	FROM videos v
 	LEFT JOIN assets a
 	  ON a.video_id = v.id
@@ -134,6 +150,7 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 	var thumbnailObjectKey sql.NullString
 	var thumbnailContentType sql.NullString
 	var thumbnailSizeBytes sql.NullInt64
+	var renditionJSON []byte
 	if err := scanner.Scan(
 		&video.ID,
 		&video.OwnerID,
@@ -156,6 +173,7 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 		&thumbnailObjectKey,
 		&thumbnailContentType,
 		&thumbnailSizeBytes,
+		&renditionJSON,
 	); err != nil {
 		return domain.Video{}, err
 	}
@@ -213,6 +231,9 @@ func scanVideo(scanner rowScanner) (domain.Video, error) {
 			value := thumbnailSizeBytes.Int64
 			video.Thumbnail.SizeBytes = &value
 		}
+	}
+	if err := json.Unmarshal(renditionJSON, &video.Renditions); err != nil {
+		return domain.Video{}, fmt.Errorf("decode renditions: %w", err)
 	}
 	return video, nil
 }

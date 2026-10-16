@@ -50,3 +50,17 @@ type MetadataProbe interface {
 type ThumbnailGenerator interface {
 	Generate(context.Context, string, string, time.Duration) error
 }
+
+// RenditionTranscoder creates one playable MP4 rendition from a downloaded
+// source video. The application service owns ordering and persistence; this
+// port owns only the media-tool invocation.
+type RenditionTranscoder interface {
+	Transcode(context.Context, RenditionTranscodeRequest) error
+}
+
+type RenditionTranscodeRequest struct {
+	SourcePath string
+	OutputPath string
+	Width      int
+	Height     int
+}

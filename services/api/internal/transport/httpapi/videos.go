@@ -37,6 +37,7 @@ type videoResponse struct {
 	Metadata          *videoMetadataResponse `json:"metadata"`
 	Failure           *videoFailureResponse  `json:"failure"`
 	Thumbnail         *thumbnailResponse     `json:"thumbnail"`
+	Renditions        []renditionResponse    `json:"renditions"`
 	ProcessingVersion int                    `json:"processing_version"`
 	CreatedAt         string                 `json:"created_at"`
 	UpdatedAt         string                 `json:"updated_at"`
@@ -45,6 +46,16 @@ type videoResponse struct {
 type thumbnailResponse struct {
 	URL       string `json:"url"`
 	ExpiresAt string `json:"expires_at"`
+}
+
+type renditionResponse struct {
+	Name      string  `json:"name"`
+	Width     int     `json:"width"`
+	Height    int     `json:"height"`
+	Codec     string  `json:"codec"`
+	Status    string  `json:"status"`
+	URL       *string `json:"url"`
+	ExpiresAt *string `json:"expires_at"`
 }
 
 type videoMetadataResponse struct {
@@ -199,14 +210,28 @@ func decodeJSON(request *http.Request, target any) error {
 
 func (s *Server) responseForVideo(ctx context.Context, video domain.Video) (videoResponse, error) {
 	response := toVideoResponse(video)
-	if video.Thumbnail == nil || s.thumbnailSigner == nil {
+	if s.assetSigner == nil {
 		return response, nil
 	}
-	url, expiresAt, err := s.thumbnailSigner.PresignThumbnail(ctx, video.Thumbnail.ObjectKey, s.thumbnailURLExpiry)
-	if err != nil {
-		return videoResponse{}, fmt.Errorf("presign thumbnail: %w", err)
+	if video.Thumbnail != nil {
+		url, expiresAt, err := s.assetSigner.PresignAsset(ctx, video.Thumbnail.ObjectKey, s.assetURLExpiry)
+		if err != nil {
+			return videoResponse{}, fmt.Errorf("presign thumbnail: %w", err)
+		}
+		response.Thumbnail = &thumbnailResponse{URL: url, ExpiresAt: expiresAt.Format(time.RFC3339Nano)}
 	}
-	response.Thumbnail = &thumbnailResponse{URL: url, ExpiresAt: expiresAt.Format(time.RFC3339Nano)}
+	for index, rendition := range video.Renditions {
+		if rendition.Status != "READY" || rendition.ObjectKey == nil {
+			continue
+		}
+		url, expiresAt, err := s.assetSigner.PresignAsset(ctx, *rendition.ObjectKey, s.assetURLExpiry)
+		if err != nil {
+			return videoResponse{}, fmt.Errorf("presign rendition %s: %w", rendition.Name, err)
+		}
+		expiresAtValue := expiresAt.Format(time.RFC3339Nano)
+		response.Renditions[index].URL = &url
+		response.Renditions[index].ExpiresAt = &expiresAtValue
+	}
 	return response, nil
 }
 
@@ -234,8 +259,20 @@ func toVideoResponse(video domain.Video) videoResponse {
 		Status:            string(video.Status),
 		Metadata:          metadata,
 		Failure:           failure,
+		Renditions:        toRenditionResponses(video.Renditions),
 		ProcessingVersion: video.ProcessingVersion,
 		CreatedAt:         video.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:         video.UpdatedAt.Format(time.RFC3339Nano),
 	}
+}
+
+func toRenditionResponses(renditions []domain.RenditionAsset) []renditionResponse {
+	responses := make([]renditionResponse, 0, len(renditions))
+	for _, rendition := range renditions {
+		responses = append(responses, renditionResponse{
+			Name: rendition.Name, Width: rendition.Width, Height: rendition.Height,
+			Codec: rendition.Codec, Status: rendition.Status,
+		})
+	}
+	return responses
 }

@@ -18,9 +18,9 @@ type fakeVideoService struct {
 	video domain.Video
 }
 
-type fakeThumbnailSigner struct{}
+type fakeAssetSigner struct{}
 
-func (fakeThumbnailSigner) PresignThumbnail(_ context.Context, objectKey string, expiry time.Duration) (string, time.Time, error) {
+func (fakeAssetSigner) PresignAsset(_ context.Context, objectKey string, expiry time.Duration) (string, time.Time, error) {
 	return "http://localhost:9000/video-platform/" + objectKey + "?signed=1", time.Now().UTC().Add(expiry), nil
 }
 
@@ -145,7 +145,7 @@ func TestGetVideoReturnsSignedThumbnailForOwnedAsset(t *testing.T) {
 		ProcessingVersion: 1,
 		Thumbnail:         &domain.ThumbnailAsset{ObjectKey: "users/owner/videos/video/thumbnails/default.jpg"},
 	}}
-	server := NewServerWithThumbnailDependencies(nil, service, nil, platformauth.StaticPrincipal{ID: "00000000-0000-4000-8000-000000000001"}, fakeThumbnailSigner{}, time.Minute)
+	server := NewServerWithAssetDependencies(nil, service, nil, platformauth.StaticPrincipal{ID: "00000000-0000-4000-8000-000000000001"}, fakeAssetSigner{}, time.Minute)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/videos/00000000-0000-4000-8000-000000000002", nil)
 	recorder := httptest.NewRecorder()
 
@@ -157,5 +157,31 @@ func TestGetVideoReturnsSignedThumbnailForOwnedAsset(t *testing.T) {
 	body := recorder.Body.String()
 	if !strings.Contains(body, `"thumbnail":{"url":"http://localhost:9000/video-platform/users/owner/videos/video/thumbnails/default.jpg?signed=1"`) {
 		t.Fatalf("body = %s, want signed thumbnail URL", body)
+	}
+}
+
+func TestGetVideoReturnsSignedRenditionForOwnedAsset(t *testing.T) {
+	objectKey := "users/owner/videos/video/renditions/360p/video.mp4"
+	service := &fakeVideoService{video: domain.Video{
+		ID:                "00000000-0000-4000-8000-000000000002",
+		OwnerID:           "00000000-0000-4000-8000-000000000001",
+		Title:             "Rendition",
+		Status:            domain.StatusReady,
+		ProcessingVersion: 1,
+		Renditions: []domain.RenditionAsset{{
+			Name: "360p", Width: 640, Height: 360, Codec: "h264", Status: "READY", ObjectKey: &objectKey,
+		}},
+	}}
+	server := NewServerWithAssetDependencies(nil, service, nil, platformauth.StaticPrincipal{ID: "00000000-0000-4000-8000-000000000001"}, fakeAssetSigner{}, time.Minute)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/videos/00000000-0000-4000-8000-000000000002", nil)
+	recorder := httptest.NewRecorder()
+
+	server.Handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"renditions":[{"name":"360p","width":640,"height":360,"codec":"h264","status":"READY","url":"http://localhost:9000/video-platform/users/owner/videos/video/renditions/360p/video.mp4?signed=1"`) {
+		t.Fatalf("body = %s, want signed rendition URL", recorder.Body.String())
 	}
 }

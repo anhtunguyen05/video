@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -31,11 +32,13 @@ type fakeProcessor struct {
 	claim        bool
 	succeeded    bool
 	metadataDone bool
+	prepared     bool
 	failed       bool
 	metadata     ports.VideoMetadata
 	sizeBytes    int64
-	asset        ports.GeneratedAsset
 	renditions   []domain.Rendition
+	started      []string
+	completed    []string
 	failureCode  string
 	failureError string
 }
@@ -51,10 +54,31 @@ func (processor *fakeProcessor) PersistMetadata(_ context.Context, _ domain.Job,
 	return nil
 }
 
-func (processor *fakeProcessor) MarkSucceeded(_ context.Context, _ domain.Job, asset ports.GeneratedAsset, renditions []domain.Rendition, _ time.Time) error {
-	processor.succeeded = true
-	processor.asset = asset
+func (processor *fakeProcessor) PrepareTranscoding(_ context.Context, _ domain.Job, _ ports.GeneratedAsset, renditions []domain.Rendition, _ time.Time) error {
+	processor.prepared = true
 	processor.renditions = renditions
+	return nil
+}
+
+func (processor *fakeProcessor) BeginRendition(_ context.Context, _ domain.Job, rendition domain.Rendition, _ time.Time) error {
+	processor.started = append(processor.started, rendition.Name)
+	return nil
+}
+
+func (processor *fakeProcessor) CompleteRendition(_ context.Context, _ domain.Job, _ ports.GeneratedAsset, rendition domain.Rendition, _ time.Time) error {
+	processor.completed = append(processor.completed, rendition.Name)
+	return nil
+}
+
+func (processor *fakeProcessor) MarkSucceeded(_ context.Context, _ domain.Job, _ time.Time) error {
+	processor.succeeded = true
+	return nil
+}
+
+func (processor *fakeProcessor) MarkRenditionFailed(_ context.Context, _ domain.Job, _ domain.Rendition, code, message string, _ time.Time) error {
+	processor.failed = true
+	processor.failureCode = code
+	processor.failureError = message
 	return nil
 }
 
@@ -81,11 +105,11 @@ func (storage fakeStorage) Download(_ context.Context, _ string, destination io.
 }
 
 type fakeAssetStorage struct {
-	content []byte
+	content map[string][]byte
 	err     error
 }
 
-func (storage *fakeAssetStorage) Upload(_ context.Context, _ string, _ string, source io.Reader, size int64) (ports.ObjectInfo, error) {
+func (storage *fakeAssetStorage) Upload(_ context.Context, objectKey string, _ string, source io.Reader, size int64) (ports.ObjectInfo, error) {
 	if storage.err != nil {
 		return ports.ObjectInfo{}, storage.err
 	}
@@ -93,13 +117,25 @@ func (storage *fakeAssetStorage) Upload(_ context.Context, _ string, _ string, s
 	if err != nil {
 		return ports.ObjectInfo{}, err
 	}
-	storage.content = content
+	if storage.content == nil {
+		storage.content = make(map[string][]byte)
+	}
+	storage.content[objectKey] = content
 	return ports.ObjectInfo{Size: size, ContentType: "image/jpeg"}, nil
 }
 
 type fakeThumbnail struct {
 	err       error
 	timestamp time.Duration
+}
+
+type fakeTranscoder struct{ err error }
+
+func (transcoder fakeTranscoder) Transcode(_ context.Context, request ports.RenditionTranscodeRequest) error {
+	if transcoder.err != nil {
+		return transcoder.err
+	}
+	return os.WriteFile(request.OutputPath, []byte("mp4"), 0o600)
 }
 
 func (thumbnail *fakeThumbnail) Generate(_ context.Context, _ string, outputPath string, timestamp time.Duration) error {
@@ -118,6 +154,7 @@ func newThumbnailService(repository *fakeRepository, processor *fakeProcessor, s
 		&fakeAssetStorage{},
 		probe,
 		&fakeThumbnail{},
+		fakeTranscoder{},
 		tempDir,
 	)
 }
@@ -174,6 +211,7 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 		assets,
 		fakeProbe{metadata: metadata},
 		thumbnail,
+		fakeTranscoder{},
 		t.TempDir(),
 		fixedClock{now: time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)},
 	)
@@ -182,11 +220,8 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleVideoUploaded() error = %v", err)
 	}
-	if !processor.metadataDone || !processor.succeeded || processor.sizeBytes != 5 || processor.metadata != metadata {
+	if !processor.metadataDone || !processor.prepared || !processor.succeeded || processor.sizeBytes != 5 || processor.metadata != metadata {
 		t.Fatalf("unexpected successful processing: %#v", processor)
-	}
-	if processor.asset.AssetType != "THUMBNAIL" || processor.asset.Variant != "default" || processor.asset.ObjectKey != "users/owner-1/videos/video-1/thumbnails/default.jpg" {
-		t.Fatalf("unexpected thumbnail asset: %#v", processor.asset)
 	}
 	if want := []domain.Rendition{
 		{Name: "360p", Width: 640, Height: 360, Codec: domain.PlannedRenditionCodec},
@@ -195,8 +230,18 @@ func TestHandleVideoUploadedProcessesQueuedJob(t *testing.T) {
 	}; !reflect.DeepEqual(processor.renditions, want) {
 		t.Fatalf("unexpected rendition plan: %#v", processor.renditions)
 	}
-	if thumbnail.timestamp != 150*time.Millisecond || string(assets.content) != "jpeg" {
+	if thumbnail.timestamp != 150*time.Millisecond || string(assets.content["users/owner-1/videos/video-1/thumbnails/default.jpg"]) != "jpeg" {
 		t.Fatalf("unexpected thumbnail output: timestamp=%s content=%q", thumbnail.timestamp, assets.content)
+	}
+	if want := []string{"360p", "720p", "1080p"}; !reflect.DeepEqual(processor.started, want) || !reflect.DeepEqual(processor.completed, want) {
+		t.Fatalf("rendition order started=%#v completed=%#v, want %#v", processor.started, processor.completed, want)
+	}
+	for _, name := range []string{"360p", "720p", "1080p"} {
+		key := filepath.Join("users", "owner-1", "videos", "video-1", "renditions", name, "video.mp4")
+		key = filepath.ToSlash(key)
+		if string(assets.content[key]) != "mp4" {
+			t.Fatalf("rendition object %q = %q, want mp4", key, assets.content[key])
+		}
 	}
 }
 
@@ -229,6 +274,44 @@ func TestHandleVideoUploadedMarksMissingSourceFailed(t *testing.T) {
 	}
 	if !processor.failed || processor.failureCode != FailureSourceNotFound {
 		t.Fatalf("unexpected failed processing: %#v", processor)
+	}
+}
+
+func TestHandleVideoUploadedRejectsSourceWithoutSupportedRendition(t *testing.T) {
+	processor := &fakeProcessor{
+		claim: true,
+		job:   domain.Job{ID: "job-1", VideoID: "video-1", OwnerID: "owner-1", SourceObjectKey: "source.mp4", ProcessingVersion: 1},
+	}
+	service := NewProcessingService(
+		&fakeRepository{}, processor, fakeStorage{content: []byte("video")}, &fakeAssetStorage{},
+		fakeProbe{metadata: ports.VideoMetadata{Width: 320, Height: 568}}, &fakeThumbnail{}, fakeTranscoder{}, t.TempDir(),
+	)
+
+	err := service.HandleVideoUploaded(context.Background(), []byte(`{"message_type":"video.uploaded.v1","schema_version":1,"payload":{"video_id":"video-1","owner_id":"owner-1","source_object_key":"source.mp4","processing_version":1}}`))
+	if err != nil {
+		t.Fatalf("HandleVideoUploaded() error = %v", err)
+	}
+	if !processor.failed || processor.failureCode != FailureNoRendition {
+		t.Fatalf("unexpected no-rendition failure: %#v", processor)
+	}
+}
+
+func TestHandleVideoUploadedMarksTranscodeFailure(t *testing.T) {
+	processor := &fakeProcessor{
+		claim: true,
+		job:   domain.Job{ID: "job-1", VideoID: "video-1", OwnerID: "owner-1", SourceObjectKey: "source.mp4", ProcessingVersion: 1},
+	}
+	service := NewProcessingService(
+		&fakeRepository{}, processor, fakeStorage{content: []byte("video")}, &fakeAssetStorage{},
+		fakeProbe{metadata: ports.VideoMetadata{Width: 640, Height: 360}}, &fakeThumbnail{}, fakeTranscoder{err: errors.New("ffmpeg failed")}, t.TempDir(),
+	)
+
+	err := service.HandleVideoUploaded(context.Background(), []byte(`{"message_type":"video.uploaded.v1","schema_version":1,"payload":{"video_id":"video-1","owner_id":"owner-1","source_object_key":"source.mp4","processing_version":1}}`))
+	if err != nil {
+		t.Fatalf("HandleVideoUploaded() error = %v", err)
+	}
+	if !processor.failed || processor.failureCode != FailureTranscode || !reflect.DeepEqual(processor.started, []string{"360p"}) {
+		t.Fatalf("unexpected transcode failure: %#v", processor)
 	}
 }
 

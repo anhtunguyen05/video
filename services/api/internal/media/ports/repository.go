@@ -10,8 +10,8 @@ import (
 
 var ErrNotFound = errors.New("video not found")
 
-type ThumbnailURLSigner interface {
-	PresignThumbnail(context.Context, string, time.Duration) (string, time.Time, error)
+type AssetURLSigner interface {
+	PresignAsset(context.Context, string, time.Duration) (string, time.Time, error)
 }
 
 type VideoCursor struct {

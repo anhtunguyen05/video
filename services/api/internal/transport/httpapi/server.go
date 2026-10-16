@@ -16,12 +16,12 @@ import (
 )
 
 type Server struct {
-	db                 postgres.DB
-	videos             VideoService
-	uploads            UploadService
-	currentUser        platformauth.CurrentUserProvider
-	thumbnailSigner    mediaPorts.ThumbnailURLSigner
-	thumbnailURLExpiry time.Duration
+	db             postgres.DB
+	videos         VideoService
+	uploads        UploadService
+	currentUser    platformauth.CurrentUserProvider
+	assetSigner    mediaPorts.AssetURLSigner
+	assetURLExpiry time.Duration
 }
 
 func NewServer(db postgres.DB) *http.Server {
@@ -40,18 +40,18 @@ func NewServerWithUploadDependencies(db postgres.DB, videos VideoService, upload
 	return newServer(db, videos, uploads, currentUser, nil, 15*time.Minute)
 }
 
-func NewServerWithThumbnailDependencies(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider, thumbnailSigner mediaPorts.ThumbnailURLSigner, thumbnailURLExpiry time.Duration) *http.Server {
-	return newServer(db, videos, uploads, currentUser, thumbnailSigner, thumbnailURLExpiry)
+func NewServerWithAssetDependencies(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider, assetSigner mediaPorts.AssetURLSigner, assetURLExpiry time.Duration) *http.Server {
+	return newServer(db, videos, uploads, currentUser, assetSigner, assetURLExpiry)
 }
 
-func newServer(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider, thumbnailSigner mediaPorts.ThumbnailURLSigner, thumbnailURLExpiry time.Duration) *http.Server {
+func newServer(db postgres.DB, videos VideoService, uploads UploadService, currentUser platformauth.CurrentUserProvider, assetSigner mediaPorts.AssetURLSigner, assetURLExpiry time.Duration) *http.Server {
 	if videos == nil {
 		videos = application.NewService(mediaPostgres.NewRepository(db))
 	}
-	if thumbnailURLExpiry <= 0 {
-		thumbnailURLExpiry = 15 * time.Minute
+	if assetURLExpiry <= 0 {
+		assetURLExpiry = 15 * time.Minute
 	}
-	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser, thumbnailSigner: thumbnailSigner, thumbnailURLExpiry: thumbnailURLExpiry}
+	api := &Server{db: db, videos: videos, uploads: uploads, currentUser: currentUser, assetSigner: assetSigner, assetURLExpiry: assetURLExpiry}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)

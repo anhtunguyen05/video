@@ -71,7 +71,7 @@ func (storage *Storage) PresignPut(ctx context.Context, objectKey, contentType s
 	}, nil
 }
 
-func (storage *Storage) PresignThumbnail(ctx context.Context, objectKey string, expiry time.Duration) (string, time.Time, error) {
+func (storage *Storage) PresignAsset(ctx context.Context, objectKey string, expiry time.Duration) (string, time.Time, error) {
 	if expiry <= 0 {
 		return "", time.Time{}, errors.New("presign expiry must be positive")
 	}
