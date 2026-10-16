@@ -111,3 +111,17 @@ func TestRunnerTranscodeReturnsCommandFailure(t *testing.T) {
 		t.Fatalf("Transcode() error = %v", err)
 	}
 }
+
+func TestRunnerPackageVariantBuildsVODMPEGTSCommand(t *testing.T) {
+	command := &fakeCommandRunner{}
+	runner := NewTranscoderWithCommand("ffmpeg-test", TranscodeProfile{}, command)
+	if err := runner.PackageVariant(context.Background(), ports.HLSVariantRequest{InputPath: "720p.mp4", OutputDir: "hls/720p"}); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.args, " ")
+	for _, expected := range []string{"-i 720p.mp4", "-c copy", "-hls_time 6", "-hls_playlist_type vod", "-hls_segment_type mpegts", "hls/720p/segment_%05d.ts", "hls/720p/index.m3u8"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("args = %v, missing %q", command.args, expected)
+		}
+	}
+}

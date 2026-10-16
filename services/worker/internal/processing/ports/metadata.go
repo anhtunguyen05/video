@@ -22,6 +22,7 @@ type SourceStorage interface {
 
 type AssetStorage interface {
 	Upload(context.Context, string, string, io.Reader, int64) (ObjectInfo, error)
+	Delete(context.Context, string) error
 }
 
 type GeneratedAsset struct {
@@ -63,4 +64,20 @@ type RenditionTranscodeRequest struct {
 	OutputPath string
 	Width      int
 	Height     int
+}
+
+type HLSVariantRequest struct {
+	InputPath string
+	OutputDir string
+}
+
+type HLSVariantPackager interface {
+	PackageVariant(context.Context, HLSVariantRequest) error
+}
+
+type HLSVariant struct {
+	Name      string
+	Width     int
+	Height    int
+	Bandwidth int64
 }

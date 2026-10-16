@@ -14,6 +14,10 @@ type AssetURLSigner interface {
 	PresignAsset(context.Context, string, time.Duration) (string, time.Time, error)
 }
 
+type AssetObjectReader interface {
+	ReadAsset(context.Context, string) ([]byte, error)
+}
+
 type VideoCursor struct {
 	CreatedAt time.Time
 	ID        string

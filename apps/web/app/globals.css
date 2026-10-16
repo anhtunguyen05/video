@@ -101,6 +101,10 @@ tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
 .rendition-heading { align-items: flex-start; display: flex; gap: 16px; justify-content: space-between; }
 .rendition-heading p { color: var(--muted); margin: 4px 0 0; }
 .rendition-video { background: #0f172a; border-radius: 8px; max-width: 100%; width: 640px; }
+.playback-section { display: grid; gap: 10px; }
+.hls-video { aspect-ratio: 16 / 9; background: #0f172a; border-radius: 10px; max-height: 560px; width: 100%; }
+.playback-error { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+.playback-error p { color: var(--danger); margin: 0; }
 .metadata-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin: 0; }
 .metadata-grid div { border-top: 1px solid var(--border); padding-top: 12px; }
 .metadata-grid dt { color: var(--muted); font-size: 0.85rem; }

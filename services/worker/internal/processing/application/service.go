@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +25,7 @@ const (
 	FailureThumbnail        = "THUMBNAIL_GENERATION_FAILED"
 	FailureNoRendition      = "NO_SUPPORTED_RENDITION"
 	FailureTranscode        = "RENDITION_TRANSCODE_FAILED"
+	FailureHLSPackaging     = "HLS_PACKAGING_FAILED"
 )
 
 const DefaultThumbnailMaxEdge = 640
@@ -39,6 +42,7 @@ type Service struct {
 	probe      ports.MetadataProbe
 	thumbnail  ports.ThumbnailGenerator
 	transcoder ports.RenditionTranscoder
+	packager   ports.HLSVariantPackager
 	tempDir    string
 	clock      Clock
 }
@@ -66,11 +70,11 @@ func NewServiceWithClock(repository ports.Repository, clock Clock) *Service {
 	return &Service{repository: repository, clock: clock}
 }
 
-func NewProcessingService(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, tempDir string) *Service {
-	return NewProcessingServiceWithClock(repository, processor, source, assets, probe, thumbnail, transcoder, tempDir, realClock{})
+func NewProcessingService(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, packager ports.HLSVariantPackager, tempDir string) *Service {
+	return NewProcessingServiceWithClock(repository, processor, source, assets, probe, thumbnail, transcoder, packager, tempDir, realClock{})
 }
 
-func NewProcessingServiceWithClock(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, tempDir string, clock Clock) *Service {
+func NewProcessingServiceWithClock(repository ports.Repository, processor ports.ProcessorRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, packager ports.HLSVariantPackager, tempDir string, clock Clock) *Service {
 	return &Service{
 		repository: repository,
 		processor:  processor,
@@ -79,6 +83,7 @@ func NewProcessingServiceWithClock(repository ports.Repository, processor ports.
 		probe:      probe,
 		thumbnail:  thumbnail,
 		transcoder: transcoder,
+		packager:   packager,
 		tempDir:    tempDir,
 		clock:      clock,
 	}
@@ -118,7 +123,7 @@ func (service *Service) HandleVideoUploaded(ctx context.Context, body []byte) er
 }
 
 func (service *Service) process(ctx context.Context, job domain.Job) error {
-	if service.source == nil || service.assets == nil || service.probe == nil || service.thumbnail == nil || service.transcoder == nil {
+	if service.source == nil || service.assets == nil || service.probe == nil || service.thumbnail == nil || service.transcoder == nil || service.packager == nil {
 		return errors.New("processing dependencies are not configured")
 	}
 	workDir, err := os.MkdirTemp(service.tempDir, "video-processing-")
@@ -199,9 +204,20 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 		return fmt.Errorf("prepare transcoding: %w", err)
 	}
 	for _, rendition := range renditions {
-		if err := service.processRendition(ctx, job, sourcePath, workDir, rendition); err != nil {
+		failed, err := service.processRendition(ctx, job, sourcePath, workDir, rendition)
+		if err != nil {
 			return err
 		}
+		if failed {
+			return nil
+		}
+	}
+	failed, err := service.packageHLS(ctx, job, workDir, renditions, metadata.DurationMS)
+	if err != nil {
+		return err
+	}
+	if failed {
+		return nil
 	}
 	if err := service.processor.MarkSucceeded(ctx, job, service.clock.Now()); err != nil {
 		return fmt.Errorf("mark processing job succeeded: %w", err)
@@ -209,9 +225,174 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	return nil
 }
 
-func (service *Service) processRendition(ctx context.Context, job domain.Job, sourcePath, workDir string, rendition domain.Rendition) error {
+func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir string, renditions []domain.Rendition, durationMS int64) (bool, error) {
+	if err := service.processor.BeginPackaging(ctx, job, service.clock.Now()); err != nil {
+		return false, fmt.Errorf("begin HLS packaging: %w", err)
+	}
+	hlsDir := filepath.Join(workDir, "hls")
+	if err := os.MkdirAll(hlsDir, 0o700); err != nil {
+		return true, service.markHLSPackagingFailed(ctx, job)
+	}
+	variants := make([]ports.HLSVariant, 0, len(renditions))
+	for _, rendition := range renditions {
+		inputPath := filepath.Join(workDir, rendition.Name+".mp4")
+		variantDir := filepath.Join(hlsDir, rendition.Name)
+		if err := os.MkdirAll(variantDir, 0o700); err != nil {
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		if err := service.packager.PackageVariant(ctx, ports.HLSVariantRequest{InputPath: inputPath, OutputDir: variantDir}); err != nil {
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		playlistPath := filepath.Join(variantDir, "index.m3u8")
+		playlist, err := os.ReadFile(playlistPath)
+		if err != nil || len(playlist) == 0 || !strings.Contains(string(playlist), "#EXT-X-ENDLIST") {
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		inputInfo, err := os.Stat(inputPath)
+		if err != nil || inputInfo.Size() <= 0 {
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		bandwidth := int64(inputInfo.Size()) * 8 * 1000 / max64(durationMS, 1)
+		variants = append(variants, ports.HLSVariant{
+			Name: rendition.Name, Width: rendition.Width, Height: rendition.Height,
+			Bandwidth: max64(bandwidth, 1),
+		})
+	}
+	master := buildMasterPlaylist(variants)
+	masterPath := filepath.Join(hlsDir, "master.m3u8")
+	if err := os.WriteFile(masterPath, master, 0o600); err != nil {
+		return true, service.markHLSPackagingFailed(ctx, job)
+	}
+	files, err := hlsFiles(hlsDir)
+	if err != nil {
+		return true, service.markHLSPackagingFailed(ctx, job)
+	}
+	for _, rendition := range renditions {
+		segmentCount := 0
+		for _, file := range files {
+			if filepath.Dir(file) == filepath.Join(hlsDir, rendition.Name) && strings.HasSuffix(file, ".ts") {
+				info, statErr := os.Stat(file)
+				if statErr != nil || info.Size() == 0 {
+					return true, service.markHLSPackagingFailed(ctx, job)
+				}
+				segmentCount++
+			}
+		}
+		if segmentCount == 0 {
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+	}
+	uploaded := make([]string, 0, len(files))
+	cleanup := func() {
+		for _, key := range uploaded {
+			_ = service.assets.Delete(context.WithoutCancel(ctx), key)
+		}
+	}
+	var masterAsset ports.GeneratedAsset
+	variantAssets := make([]ports.GeneratedAsset, 0, len(variants))
+	for _, file := range files {
+		fileBytes := fileSize(file)
+		if fileBytes <= 0 {
+			cleanup()
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		objectKey := hlsObjectKey(job, hlsDir, file)
+		handle, openErr := os.Open(file)
+		if openErr != nil {
+			cleanup()
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		info, uploadErr := service.assets.Upload(ctx, objectKey, hlsContentType(file), handle, fileBytes)
+		closeErr := handle.Close()
+		if uploadErr != nil || closeErr != nil {
+			cleanup()
+			return true, service.markHLSPackagingFailed(ctx, job)
+		}
+		uploaded = append(uploaded, objectKey)
+		if strings.HasSuffix(file, ".m3u8") {
+			assetType, variant := "HLS_VARIANT", filepath.Base(filepath.Dir(file))
+			if filepath.Clean(file) == filepath.Clean(masterPath) {
+				assetType, variant = "HLS_MASTER", "default"
+			}
+			asset := ports.GeneratedAsset{ID: uuid.NewString(), VideoID: job.VideoID, AssetType: assetType, Variant: variant, ObjectKey: objectKey, ContentType: hlsContentType(file), SizeBytes: info.Size}
+			if assetType == "HLS_MASTER" {
+				masterAsset = asset
+			} else {
+				variantAssets = append(variantAssets, asset)
+			}
+		}
+	}
+	if masterAsset.ObjectKey == "" || len(variantAssets) != len(variants) {
+		cleanup()
+		return true, service.markHLSPackagingFailed(ctx, job)
+	}
+	if err := service.processor.CompleteHLS(ctx, job, masterAsset, variantAssets, service.clock.Now()); err != nil {
+		cleanup()
+		return false, fmt.Errorf("persist HLS assets: %w", err)
+	}
+	return false, nil
+}
+
+func (service *Service) markHLSPackagingFailed(ctx context.Context, job domain.Job) error {
+	if err := service.processor.MarkFailed(ctx, job, FailureHLSPackaging, "The video HLS package could not be generated.", service.clock.Now()); err != nil {
+		return fmt.Errorf("mark HLS packaging failed: %w", err)
+	}
+	return nil
+}
+
+func buildMasterPlaylist(variants []ports.HLSVariant) []byte {
+	var builder strings.Builder
+	builder.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
+	for _, variant := range variants {
+		fmt.Fprintf(&builder, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/index.m3u8\n", variant.Bandwidth, variant.Width, variant.Height, variant.Name)
+	}
+	return []byte(builder.String())
+}
+
+func hlsFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	sort.Strings(files)
+	return files, err
+}
+
+func hlsObjectKey(job domain.Job, root, path string) string {
+	relative, _ := filepath.Rel(root, path)
+	return fmt.Sprintf("users/%s/videos/%s/hls/%s", job.OwnerID, job.VideoID, filepath.ToSlash(relative))
+}
+
+func hlsContentType(path string) string {
+	if strings.HasSuffix(path, ".m3u8") {
+		return "application/vnd.apple.mpegurl"
+	}
+	return "video/mp2t"
+}
+
+func fileSize(path string) int64 {
+	info, _ := os.Stat(path)
+	if info == nil {
+		return 0
+	}
+	return info.Size()
+}
+func max64(value, minimum int64) int64 {
+	if value < minimum {
+		return minimum
+	}
+	return value
+}
+
+func (service *Service) processRendition(ctx context.Context, job domain.Job, sourcePath, workDir string, rendition domain.Rendition) (bool, error) {
 	if err := service.processor.BeginRendition(ctx, job, rendition, service.clock.Now()); err != nil {
-		return fmt.Errorf("begin rendition %s: %w", rendition.Name, err)
+		return false, fmt.Errorf("begin rendition %s: %w", rendition.Name, err)
 	}
 	outputPath := filepath.Join(workDir, rendition.Name+".mp4")
 	if err := service.transcoder.Transcode(ctx, ports.RenditionTranscodeRequest{
@@ -220,24 +401,24 @@ func (service *Service) processRendition(ctx context.Context, job domain.Job, so
 		Width:      rendition.Width,
 		Height:     rendition.Height,
 	}); err != nil {
-		return service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition could not be generated.")
+		return true, service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition could not be generated.")
 	}
 	outputInfo, err := os.Stat(outputPath)
 	if err != nil || outputInfo.Size() <= 0 {
-		return service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output was empty.")
+		return true, service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output was empty.")
 	}
 	outputFile, err := os.Open(outputPath)
 	if err != nil {
-		return service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output could not be opened.")
+		return true, service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output could not be opened.")
 	}
 	objectKey := renditionObjectKey(job, rendition)
 	_, uploadErr := service.assets.Upload(ctx, objectKey, "video/mp4", outputFile, outputInfo.Size())
 	closeErr := outputFile.Close()
 	if uploadErr != nil {
-		return fmt.Errorf("upload rendition %s: %w", rendition.Name, uploadErr)
+		return false, fmt.Errorf("upload rendition %s: %w", rendition.Name, uploadErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close rendition %s: %w", rendition.Name, closeErr)
+		return false, fmt.Errorf("close rendition %s: %w", rendition.Name, closeErr)
 	}
 	asset := ports.GeneratedAsset{
 		ID:          uuid.NewString(),
@@ -249,9 +430,9 @@ func (service *Service) processRendition(ctx context.Context, job domain.Job, so
 		SizeBytes:   outputInfo.Size(),
 	}
 	if err := service.processor.CompleteRendition(ctx, job, asset, rendition, service.clock.Now()); err != nil {
-		return fmt.Errorf("complete rendition %s: %w", rendition.Name, err)
+		return false, fmt.Errorf("complete rendition %s: %w", rendition.Name, err)
 	}
-	return nil
+	return false, nil
 }
 
 func thumbnailTimestamp(durationMS int64) time.Duration {

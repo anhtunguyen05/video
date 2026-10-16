@@ -105,6 +105,13 @@ PersistAssets
 CompleteProcessing
 ```
 
+Milestone 8 packages the existing MP4 rendition files sequentially using
+FFmpeg stream copy. Each VOD variant uses MPEG-TS segments with a six-second
+target. Store `hls/master.m3u8`, `hls/{quality}/index.m3u8`, and the variant's
+segments in private object storage. Persist master and variant playlist assets;
+do not create rows for segments. The video becomes `READY` only after every
+playlist and segment has been uploaded and the HLS asset rows are committed.
+
 ## 5. ValidateSource
 
 Check:

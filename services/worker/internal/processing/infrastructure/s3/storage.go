@@ -62,6 +62,10 @@ func (storage *Storage) Upload(ctx context.Context, objectKey, contentType strin
 	return ports.ObjectInfo{Size: info.Size, ContentType: contentType}, nil
 }
 
+func (storage *Storage) Delete(ctx context.Context, objectKey string) error {
+	return mapStorageError(storage.client.RemoveObject(ctx, storage.bucket, objectKey, minio.RemoveObjectOptions{}))
+}
+
 func mapStorageError(err error) error {
 	if err == nil {
 		return nil

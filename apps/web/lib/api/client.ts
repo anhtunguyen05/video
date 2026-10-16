@@ -4,6 +4,7 @@ import type {
   UploadCompleteEnvelope,
   UploadEnvelope,
   UploadSession,
+  PlaybackEnvelope,
   VideoEnvelope,
   VideoListEnvelope,
 } from "@/types/video";
@@ -73,6 +74,15 @@ export async function listVideos(): Promise<VideoListEnvelope> {
 
 export async function getVideo(videoId: string): Promise<VideoEnvelope> {
   return request<VideoEnvelope>(`/videos/${encodeURIComponent(videoId)}`);
+}
+
+export async function getPlayback(videoId: string): Promise<PlaybackEnvelope> {
+  const playback = await request<PlaybackEnvelope>(`/videos/${encodeURIComponent(videoId)}/playback`);
+  const url = playback.data.url.startsWith("/api/v1/")
+    ? "/api/backend" + playback.data.url
+    : playback.data.url;
+  const separator = url.includes("?") ? "&" : "?";
+  return { data: { ...playback.data, url: `${url}${separator}playback_expires_at=${encodeURIComponent(playback.data.expires_at)}` } };
 }
 
 export async function createVideo(input: CreateVideoInput): Promise<VideoEnvelope> {

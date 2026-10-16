@@ -67,6 +67,63 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /videos/{videoId}/playback:
+    parameters:
+      - $ref: '#/components/parameters/VideoId'
+    get:
+      operationId: getVideoPlayback
+      summary: Get the authenticated HLS playback manifest URL
+      responses:
+        '200':
+          description: Short-lived HLS playback session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /videos/{videoId}/playback/hls/master.m3u8:
+    parameters:
+      - $ref: '#/components/parameters/VideoId'
+    get:
+      operationId: getHlsMasterManifest
+      summary: Get the owner-authenticated HLS master playlist
+      responses:
+        '200':
+          description: HLS playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /videos/{videoId}/playback/hls/{quality}/index.m3u8:
+    parameters:
+      - $ref: '#/components/parameters/VideoId'
+      - name: quality
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [360p, 720p, 1080p]
+    get:
+      operationId: getHlsVariantManifest
+      summary: Get an owner-authenticated HLS variant playlist with signed segment URLs
+      responses:
+        '200':
+          description: HLS variant playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /videos/{videoId}/uploads:
     parameters:
       - $ref: '#/components/parameters/VideoId'
@@ -322,6 +379,25 @@ components:
           type: string
           format: date-time
           nullable: true
+    PlaybackSession:
+      type: object
+      required: [type, url, expires_at]
+      properties:
+        type:
+          type: string
+          const: hls
+        url:
+          type: string
+          format: uri-reference
+        expires_at:
+          type: string
+          format: date-time
+    PlaybackEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/PlaybackSession'
     VideoEnvelope:
       type: object
       required: [data]
