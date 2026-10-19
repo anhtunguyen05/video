@@ -72,7 +72,7 @@ services:
       TRANSCODE_PRESET: ${TRANSCODE_PRESET:-medium}
       TRANSCODE_CRF: ${TRANSCODE_CRF:-23}
       PROCESSING_TEMP_DIR: /tmp/video-processing
-      SHUTDOWN_TIMEOUT_SECONDS: ${SHUTDOWN_TIMEOUT_SECONDS:-10}
+      SHUTDOWN_TIMEOUT_SECONDS: ${SHUTDOWN_TIMEOUT_SECONDS:-30}
     depends_on:
       postgres:
         condition: service_healthy

@@ -21,6 +21,8 @@ const (
 type Publisher struct {
 	connection *amqp091.Connection
 	channel    *amqp091.Channel
+	confirms   <-chan amqp091.Confirmation
+	returns    <-chan amqp091.Return
 	mutex      sync.Mutex
 }
 
@@ -59,7 +61,16 @@ func NewPublisher(url string) (*Publisher, error) {
 		_ = connection.Close()
 		return nil, fmt.Errorf("bind RabbitMQ queue: %w", err)
 	}
-	return &Publisher{connection: connection, channel: channel}, nil
+	if err := channel.Confirm(false); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+		return nil, fmt.Errorf("enable RabbitMQ confirms: %w", err)
+	}
+	return &Publisher{
+		connection: connection, channel: channel,
+		confirms: channel.NotifyPublish(make(chan amqp091.Confirmation, 1)),
+		returns:  channel.NotifyReturn(make(chan amqp091.Return, 1)),
+	}, nil
 }
 
 func (publisher *Publisher) PublishVideoUploaded(ctx context.Context, event ports.VideoUploaded) error {

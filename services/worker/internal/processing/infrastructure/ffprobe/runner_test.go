@@ -3,7 +3,11 @@ package ffprobe
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"strings"
 	"testing"
+
+	"video/services/worker/internal/processing/ports"
 )
 
 type fakeCommandRunner struct {
@@ -11,6 +15,16 @@ type fakeCommandRunner struct {
 	err    error
 	path   string
 	args   []string
+}
+
+func TestProbePreservesMissingExecutable(t *testing.T) {
+	root := &exec.Error{Name: "ffprobe", Err: exec.ErrNotFound}
+	runner := NewRunnerWithCommand("ffprobe", &fakeCommandRunner{err: root})
+	_, err := runner.Probe(context.Background(), "source.mp4")
+	var actual *exec.Error
+	if !errors.Is(err, ports.ErrInvalidConfiguration) || !errors.As(err, &actual) || actual != root {
+		t.Fatalf("Probe() error = %v, want configuration error wrapping executable error", err)
+	}
 }
 
 func (runner *fakeCommandRunner) Run(_ context.Context, path string, args ...string) ([]byte, error) {
@@ -54,7 +68,7 @@ func TestRunnerProbeReturnsCommandFailure(t *testing.T) {
 	runner := NewRunnerWithCommand("ffprobe", &fakeCommandRunner{output: []byte("Invalid data found"), err: errors.New("exit status 1")})
 
 	_, err := runner.Probe(context.Background(), "source.mp4")
-	if !errors.Is(err, ErrInvalidMetadata) || err.Error() != "invalid media: ffprobe failed: Invalid data found" {
+	if !errors.Is(err, ErrInvalidMetadata) || !strings.Contains(err.Error(), "invalid media: ffprobe failed: Invalid data found") {
 		t.Fatalf("Probe() error = %v", err)
 	}
 }

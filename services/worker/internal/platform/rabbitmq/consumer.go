@@ -62,7 +62,7 @@ func (consumer *Consumer) Run(ctx context.Context, service *processingapplicatio
 		return fmt.Errorf("consume RabbitMQ messages: %w", err)
 	}
 	for delivery := range deliveries {
-		err := service.HandleVideoUploaded(ctx, delivery.Body)
+		err := service.EnqueueVideoUploaded(ctx, delivery.Body)
 		if err == nil {
 			if ackErr := delivery.Ack(false); ackErr != nil {
 				return fmt.Errorf("ack RabbitMQ message: %w", ackErr)
@@ -70,14 +70,17 @@ func (consumer *Consumer) Run(ctx context.Context, service *processingapplicatio
 			continue
 		}
 		if errors.Is(err, processingapplication.ErrInvalidMessage) {
-			if nackErr := delivery.Nack(false, false); nackErr != nil {
-				return fmt.Errorf("reject invalid RabbitMQ message: %w", nackErr)
+			if quarantineErr := service.Quarantine(ctx, delivery.Body, err.Error()); quarantineErr != nil {
+				return fmt.Errorf("quarantine invalid RabbitMQ message: %w", quarantineErr)
+			}
+			if ackErr := delivery.Ack(false); ackErr != nil {
+				return fmt.Errorf("ack quarantined RabbitMQ message: %w", ackErr)
 			}
 			continue
 		}
-		if nackErr := delivery.Nack(false, true); nackErr != nil {
-			return fmt.Errorf("requeue RabbitMQ message: %w", nackErr)
-		}
+		// Closing the channel redelivers the unacknowledged event after a
+		// database outage without creating a tight requeue loop.
+		return fmt.Errorf("enqueue RabbitMQ message: %w", err)
 	}
 	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
 		return err

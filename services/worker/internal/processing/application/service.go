@@ -37,6 +37,7 @@ type Clock interface {
 type Service struct {
 	repository ports.Repository
 	processor  ports.ProcessorRepository
+	reliable   ports.ReliableRepository
 	source     ports.SourceStorage
 	assets     ports.AssetStorage
 	probe      ports.MetadataProbe
@@ -47,13 +48,21 @@ type Service struct {
 	clock      Clock
 }
 
+func NewReliableProcessingService(repository ports.Repository, processor ports.ProcessorRepository, reliable ports.ReliableRepository, source ports.SourceStorage, assets ports.AssetStorage, probe ports.MetadataProbe, thumbnail ports.ThumbnailGenerator, transcoder ports.RenditionTranscoder, packager ports.HLSVariantPackager, tempDir string) *Service {
+	service := NewProcessingService(repository, processor, source, assets, probe, thumbnail, transcoder, packager, tempDir)
+	service.reliable = reliable
+	return service
+}
+
 type realClock struct{}
 
 func (realClock) Now() time.Time { return time.Now().UTC() }
 
 type eventEnvelope struct {
+	MessageID     string `json:"message_id"`
 	MessageType   string `json:"message_type"`
 	SchemaVersion int    `json:"schema_version"`
+	OccurredAt    string `json:"occurred_at"`
 	Payload       struct {
 		VideoID           string `json:"video_id"`
 		OwnerID           string `json:"owner_id"`
@@ -90,21 +99,9 @@ func NewProcessingServiceWithClock(repository ports.Repository, processor ports.
 }
 
 func (service *Service) HandleVideoUploaded(ctx context.Context, body []byte) error {
-	var event eventEnvelope
-	if err := json.Unmarshal(body, &event); err != nil {
-		return fmt.Errorf("%w: decode JSON: %v", ErrInvalidMessage, err)
-	}
-	if event.MessageType != "video.uploaded.v1" || event.SchemaVersion != 1 {
-		return fmt.Errorf("%w: unexpected message type", ErrInvalidMessage)
-	}
-	job, err := domain.NewQueuedJob(domain.VideoUploaded{
-		VideoID:           event.Payload.VideoID,
-		OwnerID:           event.Payload.OwnerID,
-		SourceObjectKey:   event.Payload.SourceObjectKey,
-		ProcessingVersion: event.Payload.ProcessingVersion,
-	}, service.clock.Now())
+	job, err := service.queuedJob(body, false)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidMessage, err)
+		return err
 	}
 	if err := service.repository.CreateQueued(ctx, job); err != nil {
 		return fmt.Errorf("create queued processing job: %w", err)
@@ -120,6 +117,65 @@ func (service *Service) HandleVideoUploaded(ctx context.Context, body []byte) er
 		return nil
 	}
 	return service.process(ctx, claimedJob)
+}
+
+// EnqueueVideoUploaded is the M9 consumer path. Processing is driven by the
+// due-job scheduler, so ACK never depends on the lifetime of FFmpeg.
+func (service *Service) EnqueueVideoUploaded(ctx context.Context, body []byte) error {
+	job, err := service.queuedJob(body, true)
+	if err != nil {
+		return err
+	}
+	if err := service.repository.CreateQueued(ctx, job); err != nil {
+		return fmt.Errorf("create queued processing job: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) Quarantine(ctx context.Context, body []byte, reason string) error {
+	if service.reliable == nil {
+		return errors.New("reliability repository is unavailable")
+	}
+	return service.reliable.Quarantine(ctx, body, "INVALID_EVENT", reason, service.clock.Now())
+}
+
+func (service *Service) ProcessClaimed(ctx context.Context, job domain.Job) error {
+	return service.process(ctx, job)
+}
+
+func (service *Service) queuedJob(body []byte, strict bool) (domain.Job, error) {
+	var event eventEnvelope
+	if err := json.Unmarshal(body, &event); err != nil {
+		return domain.Job{}, fmt.Errorf("%w: decode JSON: %v", ErrInvalidMessage, err)
+	}
+	if event.MessageType != "video.uploaded.v1" || event.SchemaVersion != 1 {
+		return domain.Job{}, fmt.Errorf("%w: unexpected message type", ErrInvalidMessage)
+	}
+	if strict {
+		if _, err := uuid.Parse(event.MessageID); err != nil {
+			return domain.Job{}, fmt.Errorf("%w: invalid message id", ErrInvalidMessage)
+		}
+		if _, err := uuid.Parse(event.Payload.VideoID); err != nil {
+			return domain.Job{}, fmt.Errorf("%w: invalid video id", ErrInvalidMessage)
+		}
+		if _, err := uuid.Parse(event.Payload.OwnerID); err != nil {
+			return domain.Job{}, fmt.Errorf("%w: invalid owner id", ErrInvalidMessage)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, event.OccurredAt); err != nil {
+			return domain.Job{}, fmt.Errorf("%w: invalid occurrence time", ErrInvalidMessage)
+		}
+	}
+	job, err := domain.NewQueuedJob(domain.VideoUploaded{
+		VideoID:           event.Payload.VideoID,
+		OwnerID:           event.Payload.OwnerID,
+		SourceObjectKey:   event.Payload.SourceObjectKey,
+		ProcessingVersion: event.Payload.ProcessingVersion,
+	}, service.clock.Now())
+	if err != nil {
+		return domain.Job{}, fmt.Errorf("%w: %v", ErrInvalidMessage, err)
+	}
+	job.OriginalMessage = append([]byte(nil), body...)
+	return job, nil
 }
 
 func (service *Service) process(ctx context.Context, job domain.Job) error {
@@ -162,6 +218,9 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	if err := service.processor.PersistMetadata(ctx, job, metadata, objectInfo.Size, service.clock.Now()); err != nil {
 		return fmt.Errorf("persist video metadata: %w", err)
 	}
+	if err := service.recordOperation(ctx, job, "METADATA", "default", ""); err != nil {
+		return err
+	}
 	renditions, err := domain.PlanRenditions(metadata.Width, metadata.Height)
 	if err != nil {
 		return fmt.Errorf("plan renditions: %w", err)
@@ -172,6 +231,9 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 
 	thumbnailPath := filepath.Join(workDir, "thumbnail.jpg")
 	if err := service.thumbnail.Generate(ctx, sourcePath, thumbnailPath, thumbnailTimestamp(metadata.DurationMS)); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return service.markFailed(ctx, job, FailureThumbnail, "The video thumbnail could not be generated.")
 	}
 	thumbnailInfo, err := os.Stat(thumbnailPath)
@@ -202,6 +264,9 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	}
 	if err := service.processor.PrepareTranscoding(ctx, job, thumbnailAsset, renditions, service.clock.Now()); err != nil {
 		return fmt.Errorf("prepare transcoding: %w", err)
+	}
+	if err := service.recordOperation(ctx, job, "THUMBNAIL", "default", thumbnailAsset.ObjectKey); err != nil {
+		return err
 	}
 	for _, rendition := range renditions {
 		failed, err := service.processRendition(ctx, job, sourcePath, workDir, rendition)
@@ -241,6 +306,9 @@ func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir 
 			return true, service.markHLSPackagingFailed(ctx, job)
 		}
 		if err := service.packager.PackageVariant(ctx, ports.HLSVariantRequest{InputPath: inputPath, OutputDir: variantDir}); err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			return true, service.markHLSPackagingFailed(ctx, job)
 		}
 		playlistPath := filepath.Join(variantDir, "index.m3u8")
@@ -284,6 +352,9 @@ func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir 
 	}
 	uploaded := make([]string, 0, len(files))
 	cleanup := func() {
+		if job.RunID != "" {
+			return
+		}
 		for _, key := range uploaded {
 			_ = service.assets.Delete(context.WithoutCancel(ctx), key)
 		}
@@ -306,6 +377,12 @@ func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir 
 		closeErr := handle.Close()
 		if uploadErr != nil || closeErr != nil {
 			cleanup()
+			if uploadErr != nil && job.RunID != "" {
+				return false, fmt.Errorf("upload HLS object: %w", uploadErr)
+			}
+			if closeErr != nil && job.RunID != "" {
+				return false, fmt.Errorf("close HLS object: %w", closeErr)
+			}
 			return true, service.markHLSPackagingFailed(ctx, job)
 		}
 		uploaded = append(uploaded, objectKey)
@@ -327,8 +404,18 @@ func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir 
 		return true, service.markHLSPackagingFailed(ctx, job)
 	}
 	if err := service.processor.CompleteHLS(ctx, job, masterAsset, variantAssets, service.clock.Now()); err != nil {
-		cleanup()
+		if job.RunID == "" {
+			cleanup()
+		}
 		return false, fmt.Errorf("persist HLS assets: %w", err)
+	}
+	for _, asset := range variantAssets {
+		if err := service.recordOperation(ctx, job, "HLS", asset.Variant, asset.ObjectKey); err != nil {
+			return false, err
+		}
+	}
+	if err := service.recordOperation(ctx, job, "HLS", "master", masterAsset.ObjectKey); err != nil {
+		return false, err
 	}
 	return false, nil
 }
@@ -366,6 +453,9 @@ func hlsFiles(root string) ([]string, error) {
 
 func hlsObjectKey(job domain.Job, root, path string) string {
 	relative, _ := filepath.Rel(root, path)
+	if job.RunID != "" {
+		return runPrefix(job) + "hls/" + filepath.ToSlash(relative)
+	}
 	return fmt.Sprintf("users/%s/videos/%s/hls/%s", job.OwnerID, job.VideoID, filepath.ToSlash(relative))
 }
 
@@ -401,6 +491,9 @@ func (service *Service) processRendition(ctx context.Context, job domain.Job, so
 		Width:      rendition.Width,
 		Height:     rendition.Height,
 	}); err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
 		return true, service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition could not be generated.")
 	}
 	outputInfo, err := os.Stat(outputPath)
@@ -432,6 +525,9 @@ func (service *Service) processRendition(ctx context.Context, job domain.Job, so
 	if err := service.processor.CompleteRendition(ctx, job, asset, rendition, service.clock.Now()); err != nil {
 		return false, fmt.Errorf("complete rendition %s: %w", rendition.Name, err)
 	}
+	if err := service.recordOperation(ctx, job, "TRANSCODE", rendition.Name, asset.ObjectKey); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
@@ -452,11 +548,28 @@ func thumbnailTimestamp(durationMS int64) time.Duration {
 }
 
 func thumbnailObjectKey(job domain.Job) string {
+	if job.RunID != "" {
+		return runPrefix(job) + "thumbnails/default.jpg"
+	}
 	return fmt.Sprintf("users/%s/videos/%s/thumbnails/default.jpg", job.OwnerID, job.VideoID)
 }
 
 func renditionObjectKey(job domain.Job, rendition domain.Rendition) string {
+	if job.RunID != "" {
+		return runPrefix(job) + "renditions/" + rendition.Name + "/video.mp4"
+	}
 	return fmt.Sprintf("users/%s/videos/%s/renditions/%s/video.mp4", job.OwnerID, job.VideoID, rendition.Name)
+}
+
+func runPrefix(job domain.Job) string {
+	return fmt.Sprintf("users/%s/videos/%s/processing/v%d/runs/%s/", job.OwnerID, job.VideoID, job.ProcessingVersion, job.RunID)
+}
+
+func (service *Service) recordOperation(ctx context.Context, job domain.Job, stage, variant, objectKey string) error {
+	if service.reliable == nil || job.RunID == "" {
+		return nil
+	}
+	return service.reliable.RecordOperation(ctx, job, stage, variant, objectKey, service.clock.Now())
 }
 
 func (service *Service) markFailed(ctx context.Context, job domain.Job, code, message string) error {

@@ -52,8 +52,12 @@ create job if absent
 ↓
 mark QUEUED
 ↓
-enqueue processing.execute.v1
+ACK after DB commit
 ```
+
+Milestone 9 still uses the one-hop `video.uploaded.v1` topology. PostgreSQL
+schedules the sequential worker job; `processing.execute.v1` remains a later
+service boundary.
 
 ## 3. processing.execute.v1
 
@@ -130,18 +134,23 @@ INVALID_PROCESSING_CONFIGURATION
 ```
 
 Không dùng riêng FFmpeg exit code để quyết định retry.
+Broker publish failures retry the outbox event; they do not consume a
+processing-job attempt. MinIO timeouts and 5xx errors retry the job. MinIO
+credential or bucket configuration errors are terminal.
 
 ## 7. Retry policy
 
 ```text
-attempt 1
-↓ 30s
-attempt 2
-↓ 2m
-attempt 3
-↓ 10m
-DLQ
+attempt 1 → wait 30s → attempt 2 → wait 2m → attempt 3
+→ wait 10m → attempt 4 → FAILED + DLQ if still retryable
 ```
+
+The worker polls due jobs every five seconds. A claim assigns a new `run_id`
+and 90-second lease; a heartbeat renews it every 15 seconds. An expired lease
+counts as `PROCESS_INTERRUPTED` and follows the same bounded schedule. A
+non-retryable error transitions directly to `FAILED` without another attempt.
+`next_retry_at` lives in PostgreSQL; RabbitMQ does not hot-requeue processing
+failures.
 
 ## 8. Dead-letter queue
 
@@ -157,22 +166,37 @@ Giữ:
 
 Không auto-loop DLQ.
 
+The worker records invalid input and exhausted jobs in
+`processing_dead_letters`, then publishes `processing.dead.v1` through an
+outbox to the durable RabbitMQ queue of the same name. Redelivery of the same
+invalid body or exhausted job does not create another logical dead letter.
+
 ## 9. Idempotency
 
-Operation identity:
+Job identity:
 ```text
-{video_id}:{stage}:{processing_version}:{variant}
+{video_id}:PROCESS:v{processing_version}
+```
+
+Stage operation identity:
+```text
+{video_id}:{stage}:v{processing_version}:{variant}
 ```
 
 Ví dụ:
 ```text
-vid_123:METADATA:v1
-vid_123:THUMBNAIL:v1
+vid_123:METADATA:v1:default
+vid_123:THUMBNAIL:v1:default
 vid_123:TRANSCODE:v1:360p
-vid_123:HLS:v1
+vid_123:HLS:v1:master
 ```
 
 Ưu tiên DB unique constraint bảo vệ invariant.
+
+Milestone 9 retries the whole pipeline, updating the same stage-operation row
+for each successful rerun. Generated output paths include the `run_id`; only
+the active run may update DB state, and a failed run cannot delete another
+run's objects.
 
 ## 10. Ack policy
 
@@ -189,10 +213,13 @@ crash
 Đúng hơn:
 ```text
 receive
-do work
-persist result
+validate and persist job
 ACK
 ```
+
+The PostgreSQL scheduler claims and executes the job separately. Publisher
+confirms plus the upload outbox cover the DB-commit/broker-publish gap; duplicate
+event delivery is expected and safe.
 
 ## 11. Stale event
 
@@ -202,11 +229,12 @@ Dùng:
 ```text
 video_id
 processing_version
+run_id and unexpired lease
 ```
 
 ## 12. Outbox
 
-Reliability milestone:
+Milestone 9:
 ```text
 transaction
 ├── update DB

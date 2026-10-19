@@ -48,13 +48,6 @@ func main() {
 	}
 	storageCancel()
 
-	publisher, err := uploadRabbitMQ.NewPublisher(cfg.RabbitMQURL)
-	if err != nil {
-		logger.Error("create RabbitMQ publisher", "error", err)
-		return
-	}
-	defer publisher.Close()
-
 	videoService := mediaapplication.NewService(mediaPostgres.NewRepository(db))
 	allowedTypes := make(map[string]struct{}, len(cfg.AllowedUploadMimeTypes))
 	for _, contentType := range cfg.AllowedUploadMimeTypes {
@@ -69,7 +62,7 @@ func main() {
 			AllowedTypes: allowedTypes,
 			URLExpiry:    cfg.UploadURLExpiry,
 		},
-		publisher,
+		nil,
 	)
 	server := httpapi.NewServerWithAssetDependencies(db, videoService, uploadService, platformauth.StaticPrincipal{ID: cfg.DevUserID}, storage, cfg.UploadURLExpiry)
 	server.Addr = cfg.HTTPAddr
@@ -81,6 +74,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go uploadRabbitMQ.RunOutboxLoop(ctx, db, cfg.RabbitMQURL, logger)
 	select {
 	case err := <-serverErr:
 		if !errors.Is(err, http.ErrServerClosed) {

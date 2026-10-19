@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -49,7 +50,7 @@ func (storage *Storage) Download(ctx context.Context, objectKey string, destinat
 		return ports.ObjectInfo{}, mapStorageError(err)
 	}
 	if _, err := io.Copy(destination, object); err != nil {
-		return ports.ObjectInfo{}, fmt.Errorf("%w: %v", ports.ErrObjectUnreadable, err)
+		return ports.ObjectInfo{}, fmt.Errorf("download object stream: %w", err)
 	}
 	return ports.ObjectInfo{Size: info.Size, ContentType: info.ContentType}, nil
 }
@@ -66,12 +67,28 @@ func (storage *Storage) Delete(ctx context.Context, objectKey string) error {
 	return mapStorageError(storage.client.RemoveObject(ctx, storage.bucket, objectKey, minio.RemoveObjectOptions{}))
 }
 
+func (storage *Storage) DeletePrefix(ctx context.Context, prefix string) error {
+	for item := range storage.client.ListObjects(ctx, storage.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if item.Err != nil {
+			return mapStorageError(item.Err)
+		}
+		if err := storage.Delete(ctx, item.Key); err != nil && !errors.Is(err, ports.ErrObjectNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 func mapStorageError(err error) error {
 	if err == nil {
 		return nil
 	}
 	response := minio.ToErrorResponse(err)
-	if response.Code == "NoSuchKey" || response.Code == "NoSuchBucket" || strings.Contains(strings.ToLower(err.Error()), "not found") {
+	if response.Code == "AccessDenied" || response.Code == "InvalidAccessKeyId" ||
+		response.Code == "SignatureDoesNotMatch" || response.Code == "NoSuchBucket" {
+		return fmt.Errorf("%w: %v", ports.ErrInvalidConfiguration, err)
+	}
+	if response.Code == "NoSuchKey" || strings.Contains(strings.ToLower(err.Error()), "not found") {
 		return fmt.Errorf("%w: %v", ports.ErrObjectNotFound, err)
 	}
 	return err
@@ -79,3 +96,4 @@ func mapStorageError(err error) error {
 
 var _ ports.SourceStorage = (*Storage)(nil)
 var _ ports.AssetStorage = (*Storage)(nil)
+var _ ports.RunCleaner = (*Storage)(nil)

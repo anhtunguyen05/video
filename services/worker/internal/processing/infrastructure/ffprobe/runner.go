@@ -3,6 +3,7 @@ package ffprobe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -65,11 +66,18 @@ type probeFormat struct {
 func (runner *Runner) Probe(ctx context.Context, path string) (ports.VideoMetadata, error) {
 	output, err := runner.run.Run(ctx, runner.path, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ports.VideoMetadata{}, ctx.Err()
+		}
+		var executableError *exec.Error
+		if errors.As(err, &executableError) {
+			return ports.VideoMetadata{}, fmt.Errorf("%w: start ffprobe: %w", ports.ErrInvalidConfiguration, err)
+		}
 		message := strings.TrimSpace(string(output))
 		if message == "" {
-			message = err.Error()
+			return ports.VideoMetadata{}, fmt.Errorf("run ffprobe: %w", err)
 		}
-		return ports.VideoMetadata{}, fmt.Errorf("%w: ffprobe failed: %s", ports.ErrInvalidMedia, message)
+		return ports.VideoMetadata{}, fmt.Errorf("%w: ffprobe failed: %s: %w", ports.ErrInvalidMedia, message, err)
 	}
 
 	var parsed probeOutput

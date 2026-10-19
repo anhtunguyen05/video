@@ -290,25 +290,45 @@ Video `READY` có thể phát trên browser bằng HLS.
 
 ## 11. Milestone 9 — Reliability
 
-Thêm:
-- idempotency
-- bounded retry
-- retryable/non-retryable errors
-- DLQ
-- safe final state transition
+Keep one sequential processing job per video and processing version. The
+`video.uploaded.v1` consumer validates and inserts the job, then ACKs after the
+database commit. A worker polls due jobs every five seconds. Each retry starts
+the pipeline again; stage operations have unique logical keys but no separate
+queues in this milestone.
 
-Operation key:
-```text
-{video_id}:{stage}:{processing_version}:{variant}
-```
+Job key: `{video_id}:PROCESS:v{processing_version}`. Stage key:
+`{video_id}:{stage}:v{processing_version}:{variant}` (use `default` for
+single-result stages; for example,
+`vid_123:TRANSCODE:v1:720p`). The job claim atomically increments `attempt`,
+assigns a fresh `run_id`, and grants a 90-second lease. Heartbeats renew it every
+15 seconds. A write from an expired run or old processing version is rejected.
 
-Ví dụ:
-```text
-vid_123:TRANSCODE:v1:720p
-```
+Allow four total attempts with waits of 30 seconds, two minutes, and ten
+minutes. Retryable dependency/transport failures schedule `next_retry_at` in
+PostgreSQL; invalid media, missing source, invalid processing configuration,
+and invalid FFmpeg output are terminal. A crashed run is retried after its lease
+expires. Only a terminal error or exhausted attempt budget marks the video
+`FAILED`. Job `SUCCEEDED` and video `READY` are committed together after all
+assets for the active run are persisted.
+
+Write generated objects under
+`users/{owner_id}/videos/{video_id}/processing/v{version}/runs/{run_id}/...`.
+Asset records point at the winning run. A failed run's unreferenced objects are
+removed after 24 hours; objects from older READY videos keep their existing keys.
+
+Upload completion commits its `video.uploaded.v1` outbox event in the same
+database statement. The outbox publisher uses a stable message ID, mandatory
+routing, and publisher confirms. Invalid messages and exhausted jobs create a
+durable dead-letter record and an outbox event for `processing.dead.v1`. The DLQ
+does not replay automatically. No reprocess endpoint or separate processing
+service is added in this milestone.
 
 ### Done when
-Deliver cùng message 2 lần nhưng chỉ có 1 logical result.
+Duplicate delivery produces one job and one logical result. A worker crash,
+temporary storage outage, and broker outage recover without leaving a job
+stuck or losing an acknowledged event. Exhausted attempts produce one
+inspectable dead letter. Validate these cases with PostgreSQL, RabbitMQ, MinIO,
+and an actual uploaded MP4 before marking the milestone complete.
 
 ## 12. Milestone 10 — Multiple Workers
 

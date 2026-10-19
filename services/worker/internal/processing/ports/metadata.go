@@ -10,6 +10,7 @@ import (
 var ErrObjectNotFound = errors.New("object not found")
 var ErrObjectUnreadable = errors.New("object unreadable")
 var ErrInvalidMedia = errors.New("invalid media")
+var ErrInvalidConfiguration = errors.New("invalid processing configuration")
 
 type ObjectInfo struct {
 	Size        int64
@@ -23,6 +24,10 @@ type SourceStorage interface {
 type AssetStorage interface {
 	Upload(context.Context, string, string, io.Reader, int64) (ObjectInfo, error)
 	Delete(context.Context, string) error
+}
+
+type RunCleaner interface {
+	DeletePrefix(context.Context, string) error
 }
 
 type GeneratedAsset struct {
