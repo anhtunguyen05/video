@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"video/services/worker/internal/config"
 	"video/services/worker/internal/platform/logging"
@@ -41,6 +42,12 @@ func main() {
 		return
 	}
 	defer consumer.Close()
+	deadPublisher, err := rabbitmq.NewDeadPublisher(cfg.RabbitMQURL)
+	if err != nil {
+		logger.Error("create dead-letter publisher", "error", err)
+		return
+	}
+	defer deadPublisher.Close()
 	processingRepository := processingPostgres.NewRepository(db)
 	storage, err := processingS3.New(
 		cfg.S3Endpoint,
@@ -60,7 +67,8 @@ func main() {
 		Preset:     cfg.TranscodePreset,
 		CRF:        cfg.TranscodeCRF,
 	})
-	processingService := processingapplication.NewProcessingService(
+	processingService := processingapplication.NewReliableProcessingService(
+		processingRepository,
 		processingRepository,
 		processingRepository,
 		storage,
@@ -74,10 +82,28 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	schedulerDone := make(chan struct{})
+	go func() {
+		defer close(schedulerDone)
+		processingService.RunScheduler(ctx, logger)
+	}()
+	go processingService.RunCleanup(ctx, logger)
+	go func() {
+		if err := deadPublisher.Run(ctx, db); err != nil {
+			logger.Error("dead-letter outbox stopped", "error", err)
+			stop()
+		}
+	}()
 	logger.Info("worker started", "env", cfg.AppEnv, "queue", rabbitmq.QueueName)
 	if err := consumer.Run(ctx, processingService); err != nil {
 		logger.Error("worker consumer stopped", "error", err)
 	}
+	stop()
 	logger.Info("shutdown signal received")
+	select {
+	case <-schedulerDone:
+	case <-time.After(cfg.ShutdownTimeout):
+		logger.Error("processing job did not stop before shutdown deadline")
+	}
 	logger.Info("worker stopped")
 }

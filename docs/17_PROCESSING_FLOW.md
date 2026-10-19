@@ -225,14 +225,15 @@ Expected:
 ```text
 message không mất vĩnh viễn
 ↓
-redelivery/recovery
+job lease expires (90 seconds)
 ↓
-idempotency check
+PostgreSQL schedules bounded retry
 ↓
-restart stage an toàn
+new run_id starts the pipeline again
 ```
 
-MVP không cần resume FFmpeg giữa file.
+The worker does not resume FFmpeg mid-file. The old run cannot commit after
+losing its lease, and each run writes to its own object prefix.
 
 ## 13. Duplicate message
 
@@ -249,6 +250,9 @@ unique constraint/state check
 ↓
 one logical result
 ```
+
+The RabbitMQ consumer ACKs after inserting or finding the existing job.
+The PostgreSQL scheduler owns the later processing attempts.
 
 ## 14. Temporary processing directory
 

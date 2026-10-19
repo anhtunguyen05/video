@@ -99,11 +99,14 @@ func (runner *Runner) Generate(ctx context.Context, sourcePath, outputPath strin
 	}
 	output, err := runner.run.Run(ctx, runner.path, args...)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		message := strings.TrimSpace(string(output))
 		if message == "" {
 			message = err.Error()
 		}
-		return fmt.Errorf("ffmpeg thumbnail failed: %s", message)
+		return fmt.Errorf("ffmpeg thumbnail failed: %s: %w", message, err)
 	}
 	return nil
 }
@@ -130,11 +133,14 @@ func (runner *Runner) Transcode(ctx context.Context, request ports.RenditionTran
 	}
 	output, err := runner.run.Run(ctx, runner.path, args...)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		message := strings.TrimSpace(string(output))
 		if message == "" {
 			message = err.Error()
 		}
-		return fmt.Errorf("ffmpeg transcode failed: %s", message)
+		return fmt.Errorf("ffmpeg transcode failed: %s: %w", message, err)
 	}
 	return nil
 }
@@ -156,11 +162,14 @@ func (runner *Runner) PackageVariant(ctx context.Context, request ports.HLSVaria
 	}
 	output, err := runner.run.Run(ctx, runner.path, args...)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		message := strings.TrimSpace(string(output))
 		if message == "" {
 			message = err.Error()
 		}
-		return fmt.Errorf("ffmpeg HLS packaging failed: %s", message)
+		return fmt.Errorf("ffmpeg HLS packaging failed: %s: %w", message, err)
 	}
 	return nil
 }

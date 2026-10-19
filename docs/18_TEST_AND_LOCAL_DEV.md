@@ -161,6 +161,13 @@ invalid media
 → non-retryable
 ```
 
+Milestone 9 runs at most four attempts with 30-second, two-minute, and
+ten-minute waits. Integration tests should cover an expired lease, a fenced
+old run, and a broker outage between upload completion and publication. Use
+`TEST_DATABASE_URL` against a migration-applied disposable PostgreSQL database
+for repository tests; a passing Go test without that variable skips those
+integration cases.
+
 ### Operation key
 Cùng video/stage/version phải tạo cùng logical identity.
 
@@ -257,7 +264,7 @@ kill worker
 ↓
 restart worker
 ↓
-job eventually retry/completes
+lease expires; job retries and eventually completes
 ```
 
 ## 13. E2E-005 Temporary storage failure

@@ -81,17 +81,39 @@ func (repository *Repository) CompleteOwned(ctx context.Context, ownerID, upload
 			  AND v.owner_id = $2
 			  AND v.status = 'UPLOADING'
 			  AND u.status IN ('PENDING', 'UPLOADING')
-			RETURNING v.id
-		)
-		UPDATE video_uploads u
-		SET status = 'COMPLETED', completed_size_bytes = $3,
-			completed_at = $4, updated_at = $4
-		FROM updated_video v
-		WHERE u.id = $1 AND u.video_id = v.id
-		RETURNING u.id, u.video_id, u.object_key, u.status,
+			RETURNING v.id, v.processing_version
+		), completed_upload AS (
+			UPDATE video_uploads u
+			SET status = 'COMPLETED', completed_size_bytes = $3,
+				completed_at = $4, updated_at = $4
+			FROM updated_video v
+			WHERE u.id = $1 AND u.video_id = v.id
+			RETURNING u.id, u.video_id, u.object_key, u.status, v.processing_version,
 			u.expected_content_type, u.expected_size_bytes,
 			u.completed_size_bytes, u.expires_at, u.completed_at,
 			u.created_at, u.updated_at
+		), event_identity AS (
+			SELECT gen_random_uuid() AS event_id, * FROM completed_upload
+		), inserted_event AS (
+			INSERT INTO outbox_events (id, event_key, exchange_name, routing_key, payload)
+			SELECT e.event_id, e.video_id::text || ':UPLOAD:v' || e.processing_version,
+				'video.events', 'video.uploaded.v1',
+				jsonb_build_object(
+					'message_id', e.event_id, 'message_type', 'video.uploaded.v1',
+					'schema_version', 1, 'occurred_at', $4,
+					'correlation_id', e.video_id::text, 'causation_id', e.id::text,
+					'payload', jsonb_build_object('video_id', e.video_id,
+						'owner_id', $2::uuid, 'source_object_key', e.object_key,
+						'processing_version', e.processing_version))
+			FROM event_identity e
+			ON CONFLICT (event_key) DO NOTHING
+			RETURNING id
+		)
+		SELECT e.id, e.video_id, e.object_key, e.status,
+			e.expected_content_type, e.expected_size_bytes,
+			e.completed_size_bytes, e.expires_at, e.completed_at,
+			e.created_at, e.updated_at
+		FROM event_identity e
 	`, uploadID, ownerID, sizeBytes, now)
 	session, err := scanSession(row)
 	if errors.Is(err, sql.ErrNoRows) {

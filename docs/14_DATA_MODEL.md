@@ -112,12 +112,17 @@ EXPIRED
 |---|---|---:|
 | id | uuid | no |
 | video_id | uuid | no |
-| job_type | varchar(64) | no |
+| owner_id | uuid | no |
+| source_object_key | text | no |
+| processing_version | integer | no |
 | stage | varchar(64) | no |
 | status | varchar(32) | no |
 | operation_key | varchar(255) | no |
 | attempt | integer | no |
 | max_attempts | integer | no |
+| run_id | uuid | yes |
+| lease_until | timestamptz | yes |
+| original_message | bytea | yes |
 | started_at | timestamptz | yes |
 | finished_at | timestamptz | yes |
 | next_retry_at | timestamptz | yes |
@@ -129,14 +134,12 @@ EXPIRED
 Critical constraint:
 ```text
 UNIQUE(operation_key)
+UNIQUE(video_id, processing_version)
 ```
 
 Example:
 ```text
-vid_123:METADATA:v1
-vid_123:THUMBNAIL:v1
-vid_123:TRANSCODE:v1:720p
-vid_123:HLS:v1
+vid_123:PROCESS:v1
 ```
 
 ## 6. assets
@@ -195,18 +198,29 @@ FAILED
 
 ## 8. outbox_events
 
-Thêm ở reliability milestone.
+Added in Milestone 9. Upload completion inserts its event in the same database
+statement that marks the upload complete. A publisher marks the row only after
+mandatory routing and a RabbitMQ publisher confirm.
 
 | Column | Type | Nullable |
 |---|---|---:|
 | id | uuid | no |
-| aggregate_type | varchar(64) | no |
-| aggregate_id | uuid | no |
-| event_type | varchar(128) | no |
+| event_key | text | no |
+| exchange_name | text | no |
+| routing_key | text | no |
 | payload | jsonb | no |
 | created_at | timestamptz | no |
 | published_at | timestamptz | yes |
 | attempt_count | integer | no |
+| next_attempt_at | timestamptz | no |
+| locked_until | timestamptz | yes |
+
+`processing_operations` has a unique stage-operation key, job ID, stage,
+variant, status, run ID, optional object key, and update time. `processing_runs`
+stores each attempt's private object prefix, status, and cleanup timestamps.
+`processing_dead_letters` stores a deduplication key, optional job ID,
+original message bytes, failure code/message, attempt count, and failure time.
+An operation key looks like `vid_123:TRANSCODE:v1:720p`.
 
 ## 9. ER overview
 

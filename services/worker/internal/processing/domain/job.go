@@ -37,6 +37,8 @@ type Job struct {
 	Status            Status
 	Attempt           int
 	MaxAttempts       int
+	RunID             string
+	OriginalMessage   []byte
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -53,7 +55,7 @@ func NewQueuedJob(event VideoUploaded, now time.Time) (Job, error) {
 		ProcessingVersion: event.ProcessingVersion,
 		OperationKey:      fmt.Sprintf("%s:PROCESS:v%d", event.VideoID, event.ProcessingVersion),
 		Status:            StatusQueued,
-		MaxAttempts:       3,
+		MaxAttempts:       4,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}, nil
