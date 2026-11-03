@@ -13,9 +13,10 @@ endif
 
 COMPOSE_FILE ?= compose.yaml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
+WORKER_REPLICAS ?= 3
 
 .PHONY: help test test-unit test-integration lint fmt build dev-infra-up dev-infra-down \
-	api worker worker-docker web migrate-up migrate-down
+	api worker worker-docker worker-scale web migrate-up migrate-down
 
 help:
 	@echo make test              Run available tests
@@ -24,6 +25,7 @@ help:
 	@echo make build             Build available applications
 	@echo make dev-infra-up      Start local infrastructure and Docker worker
 	@echo make worker-docker     Build and start the Docker worker with FFmpeg
+	@echo make worker-scale      Build and run WORKER_REPLICAS Docker workers, default 3
 	@echo make dev-infra-down    Stop local infrastructure
 	@echo make migrate-up        Apply PostgreSQL migrations
 	@echo make migrate-down      Roll back PostgreSQL migrations
@@ -72,6 +74,9 @@ worker:
 
 worker-docker:
 	$(COMPOSE) up -d --build worker
+
+worker-scale:
+	$(COMPOSE) up -d --build --wait --wait-timeout 60 --scale worker=$(WORKER_REPLICAS) worker
 
 web:
 	cd apps/web && npm run dev

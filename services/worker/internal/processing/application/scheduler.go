@@ -16,29 +16,40 @@ const (
 	cleanupAge        = 24 * time.Hour
 )
 
-func (service *Service) RunScheduler(ctx context.Context, logger *slog.Logger) {
-	for ctx.Err() == nil {
-		if err := service.runDue(ctx); err != nil && ctx.Err() == nil {
+// Claiming stops on claimCtx cancellation, while an already claimed job keeps
+// its workCtx (and heartbeat) until it finishes or the shutdown drain expires.
+func (service *Service) RunScheduler(claimCtx, workCtx context.Context, logger *slog.Logger) {
+	for claimCtx.Err() == nil {
+		if err := service.runDue(claimCtx, workCtx, logger); err != nil && claimCtx.Err() == nil {
 			logger.Error("processing scheduler iteration failed", "error", err)
 		}
 		select {
-		case <-ctx.Done():
+		case <-claimCtx.Done():
 			return
 		case <-time.After(pollInterval):
 		}
 	}
 }
 
-func (service *Service) runDue(ctx context.Context) error {
+func (service *Service) runDue(claimCtx, workCtx context.Context, logger *slog.Logger) error {
 	now := service.clock.Now()
-	if err := service.reliable.RecoverExpired(ctx, now); err != nil {
+	if err := service.reliable.RecoverExpired(claimCtx, now); err != nil {
 		return err
 	}
-	job, claimed, err := service.reliable.ClaimNext(ctx, now)
+	if claimCtx.Err() != nil {
+		return nil
+	}
+	job, claimed, err := service.reliable.ClaimNext(claimCtx, now)
 	if err != nil || !claimed {
 		return err
 	}
-	return service.runClaimed(ctx, job)
+	started := time.Now()
+	logger.Info("processing job claimed", "job_id", job.ID, "video_id", job.VideoID,
+		"run_id", job.RunID, "attempt", job.Attempt)
+	err = service.runClaimed(workCtx, job)
+	logger.Info("processing run ended", "job_id", job.ID, "video_id", job.VideoID,
+		"run_id", job.RunID, "duration_ms", time.Since(started).Milliseconds(), "error", err)
+	return err
 }
 
 func (service *Service) runClaimed(ctx context.Context, job domain.Job) error {

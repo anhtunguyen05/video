@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
@@ -20,6 +21,11 @@ import (
 
 func main() {
 	logger := logging.New()
+	workerID, err := os.Hostname()
+	if err != nil || workerID == "" {
+		workerID = "unknown"
+	}
+	logger = logger.With("worker_id", workerID)
 	cfg := config.Load()
 	if _, err := exec.LookPath(cfg.FFProbePath); err != nil {
 		logger.Error("ffprobe executable is unavailable", "path", cfg.FFProbePath, "error", err)
@@ -82,13 +88,21 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	workCtx, cancelWork := context.WithCancel(context.Background())
+	defer cancelWork()
 	schedulerDone := make(chan struct{})
+	cleanupDone := make(chan struct{})
+	publisherDone := make(chan struct{})
 	go func() {
 		defer close(schedulerDone)
-		processingService.RunScheduler(ctx, logger)
+		processingService.RunScheduler(ctx, workCtx, logger)
 	}()
-	go processingService.RunCleanup(ctx, logger)
 	go func() {
+		defer close(cleanupDone)
+		processingService.RunCleanup(ctx, logger)
+	}()
+	go func() {
+		defer close(publisherDone)
 		if err := deadPublisher.Run(ctx, db); err != nil {
 			logger.Error("dead-letter outbox stopped", "error", err)
 			stop()
@@ -99,11 +113,23 @@ func main() {
 		logger.Error("worker consumer stopped", "error", err)
 	}
 	stop()
-	logger.Info("shutdown signal received")
+	// Release any unacknowledged delivery before waiting for the active job.
+	// Its event can then be consumed by another replica during this drain.
+	if err := consumer.Close(); err != nil {
+		logger.Error("close worker consumer", "error", err)
+	}
+	logger.Info("worker draining")
+	drainScheduler(schedulerDone, cancelWork, cfg.ShutdownTimeout, 15*time.Second, logger)
+	backgroundDone := make(chan struct{})
+	go func() {
+		<-cleanupDone
+		<-publisherDone
+		close(backgroundDone)
+	}()
 	select {
-	case <-schedulerDone:
-	case <-time.After(cfg.ShutdownTimeout):
-		logger.Error("processing job did not stop before shutdown deadline")
+	case <-backgroundDone:
+	case <-time.After(5 * time.Second):
+		logger.Error("background worker loops did not stop before shutdown deadline")
 	}
 	logger.Info("worker stopped")
 }
