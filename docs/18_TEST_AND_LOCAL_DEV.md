@@ -89,6 +89,21 @@ Docker worker with bundled FFmpeg:
 make worker-docker
 ```
 
+Three Docker workers (each processes one video at a time):
+```bash
+make worker-scale
+# or: make worker-scale WORKER_REPLICAS=1
+```
+
+`WORKER_REPLICAS` controls Compose replica count, not parallel FFmpeg processes
+inside one worker. Each replica has a two-CPU, 2-GiB limit and uses at most four
+PostgreSQL connections. Reserve enough host CPU, RAM, and temporary disk for
+every simultaneously processed video. A worker needs room for the downloaded
+source, all planned MP4 renditions, and generated HLS files before upload.
+`WORKER_SHUTDOWN_TIMEOUT_SECONDS` defaults to 120 and is capped at 120; Compose
+gives the worker 150 seconds to stop. The API keeps its separate
+`SHUTDOWN_TIMEOUT_SECONDS` setting.
+
 When using the Docker worker, Docker service endpoints are used for
 PostgreSQL, RabbitMQ, and MinIO. The host `FFPROBE_PATH` requirement does
 not apply.
@@ -381,3 +396,37 @@ Khi processing lỗi:
 8. generated objects
 9. final DB state
 ```
+
+## 21. Milestone 10 replica acceptance
+
+Run the M9 upload-to-READY reliability cases against PostgreSQL, RabbitMQ,
+MinIO, and an actual MP4 first. Integration tests that use `TEST_DATABASE_URL`
+skip when it is unset; a normal `go test ./...` result alone is not this proof.
+
+For the M10 throughput gate, use a disposable stack with the API running on the
+host, Docker Compose infrastructure, and at least six CPUs available to Docker.
+Generate a 720p/30-second fixture under the default 100-MiB upload limit:
+
+```bash
+mkdir -p testdata/generated
+ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=1000:sample_rate=48000 -t 30 -c:v libx264 -preset veryfast -crf 23 -c:a aac -pix_fmt yuv420p -movflags +faststart testdata/generated/m10-720p-30s.mp4
+```
+
+From the repository root on Windows, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/m10-benchmark.ps1 -Fixture ./testdata/generated/m10-720p-30s.mp4
+```
+
+The script creates nine distinct videos per trial, runs three trials each at
+one and three replicas, verifies final state and overlapping jobs, and stores
+`machine.json`, `trials.json`, `summary.json`, and worker logs in
+`tmp/m10-benchmark/`. It fails if the three-replica median READY/minute is below
+1.5 times the one-replica median. Attach those files to the M10 acceptance
+report. The benchmark creates videos and objects; run it on a disposable stack.
+
+Also demonstrate SIGTERM during an active FFmpeg job: the worker stops claiming
+and either finishes within 120 seconds or cancels, schedules retry, and exits
+within 150 seconds. Kill a separate replica without SIGTERM to prove lease
+expiry recovery. Inspect PostgreSQL job/video/asset state and MinIO objects
+after each case. Keep these runtime cases `Pending` until actually observed.

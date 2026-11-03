@@ -11,7 +11,7 @@ export function HlsPlayer({ src, onRefresh }: { src: string; onRefresh: () => vo
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    if (!Hls.isSupported() && video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = src;
       return () => { video.removeAttribute("src"); video.load(); };
     }
@@ -30,7 +30,7 @@ export function HlsPlayer({ src, onRefresh }: { src: string; onRefresh: () => vo
 
   return (
     <section className="playback-section" aria-label="HLS video player">
-      <video ref={videoRef} className="hls-video" controls playsInline preload="metadata" onError={() => setFailure({ src, message: "This browser cannot play the HLS stream." })}>
+      <video ref={videoRef} className="hls-video" controls playsInline preload="metadata" onError={() => setFailure({ src, message: "Playback failed. Refresh the playback link and try again." })}>
         Your browser cannot play this video.
       </video>
       {error ? <div className="playback-error" role="alert"><p>{error}</p><button className="button button-secondary" type="button" onClick={onRefresh}>Refresh playback</button></div> : null}

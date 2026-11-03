@@ -23,6 +23,11 @@ type DeadPublisher struct {
 	returns    <-chan amqp091.Return
 }
 
+type deadEvent struct {
+	id, exchange, routing string
+	body                  []byte
+}
+
 func NewDeadPublisher(url string) (*DeadPublisher, error) {
 	connection, err := amqp091.Dial(url)
 	if err != nil {
@@ -79,26 +84,12 @@ func (publisher *DeadPublisher) Run(ctx context.Context, db *sql.DB) error {
 }
 
 func (publisher *DeadPublisher) publishNext(ctx context.Context, db *sql.DB) error {
-	var id, exchange, routing string
-	var body []byte
-	err := db.QueryRowContext(ctx, `
-		UPDATE outbox_events SET locked_until = now() + interval '30 seconds'
-		WHERE id = (
-			SELECT id FROM outbox_events WHERE exchange_name = 'processing.dead'
-			  AND published_at IS NULL AND next_attempt_at <= now()
-			  AND (locked_until IS NULL OR locked_until < now())
-			ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
-		)
-		RETURNING id::text, exchange_name, routing_key, payload::text
-	`).Scan(&id, &exchange, &routing, &body)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
+	event, claimed, err := claimDeadEvent(ctx, db)
+	if err != nil || !claimed {
 		return err
 	}
-	err = publisher.channel.PublishWithContext(ctx, exchange, routing, true, false, amqp091.Publishing{
-		ContentType: "application/json", DeliveryMode: amqp091.Persistent, MessageId: id, Body: body,
+	err = publisher.channel.PublishWithContext(ctx, event.exchange, event.routing, true, false, amqp091.Publishing{
+		ContentType: "application/json", DeliveryMode: amqp091.Persistent, MessageId: event.id, Body: event.body,
 	})
 	if err == nil {
 		select {
@@ -122,7 +113,7 @@ func (publisher *DeadPublisher) publishNext(ctx context.Context, db *sql.DB) err
 	if err != nil {
 		_, updateErr := db.ExecContext(ctx, `UPDATE outbox_events SET attempt_count = attempt_count + 1,
 			next_attempt_at = now() + make_interval(secs => LEAST(300, power(2, LEAST(attempt_count + 1, 8))::integer)),
-			locked_until = NULL WHERE id = $1`, id)
+			locked_until = NULL WHERE id = $1`, event.id)
 		if updateErr != nil {
 			return fmt.Errorf("publish dead letter: %v; record retry: %w", err, updateErr)
 		}
@@ -131,6 +122,27 @@ func (publisher *DeadPublisher) publishNext(ctx context.Context, db *sql.DB) err
 		}
 		return nil
 	}
-	_, err = db.ExecContext(ctx, `UPDATE outbox_events SET published_at = now(), locked_until = NULL WHERE id = $1`, id)
+	_, err = db.ExecContext(ctx, `UPDATE outbox_events SET published_at = now(), locked_until = NULL WHERE id = $1`, event.id)
 	return err
+}
+
+func claimDeadEvent(ctx context.Context, db *sql.DB) (deadEvent, bool, error) {
+	var event deadEvent
+	err := db.QueryRowContext(ctx, `
+		UPDATE outbox_events SET locked_until = now() + interval '30 seconds'
+		WHERE id = (
+			SELECT id FROM outbox_events WHERE exchange_name = 'processing.dead'
+			  AND published_at IS NULL AND next_attempt_at <= now()
+			  AND (locked_until IS NULL OR locked_until < now())
+			ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
+		)
+		RETURNING id::text, exchange_name, routing_key, payload::text
+	`).Scan(&event.id, &event.exchange, &event.routing, &event.body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return deadEvent{}, false, nil
+	}
+	if err != nil {
+		return deadEvent{}, false, err
+	}
+	return event, true, nil
 }

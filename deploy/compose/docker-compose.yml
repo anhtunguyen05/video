@@ -72,7 +72,7 @@ services:
       TRANSCODE_PRESET: ${TRANSCODE_PRESET:-medium}
       TRANSCODE_CRF: ${TRANSCODE_CRF:-23}
       PROCESSING_TEMP_DIR: /tmp/video-processing
-      SHUTDOWN_TIMEOUT_SECONDS: ${SHUTDOWN_TIMEOUT_SECONDS:-30}
+      WORKER_SHUTDOWN_TIMEOUT_SECONDS: ${WORKER_SHUTDOWN_TIMEOUT_SECONDS:-120}
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,6 +81,9 @@ services:
       minio:
         condition: service_healthy
     restart: unless-stopped
+    cpus: 2.0
+    mem_limit: 2g
+    stop_grace_period: 150s
     healthcheck:
       test: ["CMD-SHELL", "/usr/bin/ffprobe -version >/dev/null 2>&1 && /usr/bin/ffmpeg -version >/dev/null 2>&1"]
       interval: 10s

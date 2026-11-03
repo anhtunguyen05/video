@@ -7,5 +7,11 @@ import (
 )
 
 func Open(databaseURL string) (*sql.DB, error) {
-	return sql.Open("pgx", databaseURL)
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
+	return db, nil
 }

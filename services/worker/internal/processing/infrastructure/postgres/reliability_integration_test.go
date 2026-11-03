@@ -23,7 +23,7 @@ func TestReliableJobLifecycleAgainstPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
 	videoID, ownerID := uuid.NewString(), uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO videos (id, owner_id, title, status, source_object_key)
@@ -138,7 +138,7 @@ func TestFinalStateRequiresCurrentRunAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
 	videoID, ownerID := uuid.NewString(), uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO videos (id, owner_id, title, status, source_object_key)
@@ -200,8 +200,23 @@ func TestFinalStateRequiresCurrentRunAndVersion(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE videos SET processing_version = 1 WHERE id = $1`, videoID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.MarkSucceeded(ctx, claimed, now); err != nil {
-		t.Fatal(err)
+	finishStart := make(chan struct{})
+	finishResults := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-finishStart
+			finishResults <- repository.MarkSucceeded(ctx, claimed, now)
+		}()
+	}
+	close(finishStart)
+	finishCount := 0
+	for i := 0; i < 2; i++ {
+		if err := <-finishResults; err == nil {
+			finishCount++
+		}
+	}
+	if finishCount != 1 {
+		t.Fatalf("concurrent finalization succeeded %d times, want one", finishCount)
 	}
 	var videoStatus, jobStatus string
 	if err := db.QueryRowContext(ctx, `SELECT v.status, j.status FROM videos v JOIN processing_jobs j ON j.video_id = v.id
@@ -210,6 +225,122 @@ func TestFinalStateRequiresCurrentRunAndVersion(t *testing.T) {
 	}
 	if videoStatus != "READY" || jobStatus != "SUCCEEDED" {
 		t.Fatalf("final state = %s/%s", videoStatus, jobStatus)
+	}
+}
+
+func TestThreeWorkersClaimDistinctJobsAndRecoverTogether(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := sql.Open("pgx", url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(6)
+	ctx := context.Background()
+	repository := NewRepository(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	ownerID := uuid.NewString()
+	jobIDs := make(map[string]bool)
+	for i := 0; i < 3; i++ {
+		videoID := uuid.NewString()
+		if _, err := db.ExecContext(ctx, `INSERT INTO videos (id, owner_id, title, status, source_object_key)
+			VALUES ($1, $2, 'concurrent claim test', 'UPLOADED', 'source.mp4')`, videoID, ownerID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = db.ExecContext(ctx, `DELETE FROM processing_jobs WHERE video_id = $1`, videoID)
+			_, _ = db.ExecContext(ctx, `DELETE FROM videos WHERE id = $1`, videoID)
+		})
+		job, err := domain.NewQueuedJob(domain.VideoUploaded{VideoID: videoID, OwnerID: ownerID,
+			SourceObjectKey: "source.mp4", ProcessingVersion: 1}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.CreateQueued(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.CreateQueued(ctx, job); err != nil {
+			t.Fatalf("duplicate event created another job: %v", err)
+		}
+		jobIDs[job.ID] = true
+	}
+	type claimResult struct {
+		job domain.Job
+		ok  bool
+		err error
+	}
+	start := make(chan struct{})
+	results := make(chan claimResult, 3)
+	for i := 0; i < 3; i++ {
+		go func() {
+			<-start
+			job, ok, err := repository.ClaimNext(ctx, now)
+			results <- claimResult{job: job, ok: ok, err: err}
+		}()
+	}
+	close(start)
+	claimed := make([]domain.Job, 0, 3)
+	seen := make(map[string]bool)
+	for i := 0; i < 3; i++ {
+		result := <-results
+		if result.err != nil || !result.ok || !jobIDs[result.job.ID] || seen[result.job.ID] ||
+			result.job.Attempt != 1 || result.job.RunID == "" {
+			t.Fatalf("invalid concurrent claim: %+v", result)
+		}
+		seen[result.job.ID] = true
+		claimed = append(claimed, result.job)
+	}
+	if _, ok, err := repository.ClaimNext(ctx, now); err != nil || ok {
+		t.Fatalf("fourth worker claimed a job: ok=%v err=%v", ok, err)
+	}
+	expired := claimed[0]
+	if _, err := db.ExecContext(ctx, `UPDATE processing_jobs SET lease_until = $2 WHERE id = $1`,
+		expired.ID, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	recoverStart := make(chan struct{})
+	recoverResults := make(chan error, 3)
+	for i := 0; i < 3; i++ {
+		go func() {
+			<-recoverStart
+			recoverResults <- repository.RecoverExpired(ctx, now)
+		}()
+	}
+	close(recoverStart)
+	for i := 0; i < 3; i++ {
+		if err := <-recoverResults; err != nil {
+			t.Fatalf("concurrent recovery failed: %v", err)
+		}
+	}
+	var status string
+	var attempt int
+	var runCleared bool
+	if err := db.QueryRowContext(ctx, `SELECT status, attempt, run_id IS NULL FROM processing_jobs WHERE id = $1`,
+		expired.ID).Scan(&status, &attempt, &runCleared); err != nil {
+		t.Fatal(err)
+	}
+	if status != "QUEUED" || attempt != 1 || !runCleared {
+		t.Fatalf("recovered job = %s/%d/run cleared %v", status, attempt, runCleared)
+	}
+	if err := repository.RecordOperation(ctx, expired, "METADATA", "default", "", now); err == nil {
+		t.Fatal("expired run changed the logical operation")
+	}
+	cleanResults := make(chan error, 3)
+	for i := 0; i < 3; i++ {
+		go func() { cleanResults <- repository.MarkRunClean(ctx, expired.RunID, now) }()
+	}
+	for i := 0; i < 3; i++ {
+		if err := <-cleanResults; err != nil {
+			t.Fatalf("concurrent cleanup failed: %v", err)
+		}
+	}
+	var cleaned bool
+	if err := db.QueryRowContext(ctx, `SELECT cleaned_at IS NOT NULL FROM processing_runs WHERE id = $1`,
+		expired.RunID).Scan(&cleaned); err != nil || !cleaned {
+		t.Fatalf("failed run was not marked clean: cleaned=%v err=%v", cleaned, err)
 	}
 }
 
@@ -222,7 +353,7 @@ func TestExpiredLeaseAndStaleVersionDoNotLeaveQueuedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
 	videoID, ownerID := uuid.NewString(), uuid.NewString()
 	if _, err := db.ExecContext(ctx, `INSERT INTO videos (id, owner_id, title, status, source_object_key)

@@ -332,22 +332,44 @@ and an actual uploaded MP4 before marking the milestone complete.
 
 ## 12. Milestone 10 — Multiple Workers
 
-Chạy:
-```text
-worker-1
-worker-2
-worker-3
-```
+Scale the existing Compose worker service to three replicas with
+`make worker-scale` (`WORKER_REPLICAS=3` by default). Each replica claims at
+most one video at a time from PostgreSQL. Stages and renditions within one video
+remain sequential; there is no rendition fan-out or new queue in this milestone.
+The replica count is the concurrency setting. Each container is limited to two
+CPUs and 2 GiB RAM, and its database pool is limited to four connections.
+Provide enough local temporary disk for three simultaneous source downloads,
+MP4 renditions, and HLS packages.
 
-Test:
-- jobs phân phối
-- video khác nhau chạy song song
-- worker crash
-- worker graceful shutdown
-- không duplicate final result
+On SIGTERM, stop consuming events and claiming jobs, but keep the active job and
+its lease heartbeat running for up to 120 seconds. If it finishes, exit. If the
+deadline expires, cancel FFmpeg and storage operations, persist a retry using
+an independent short-lived context, and exit within Compose's 150-second stop
+grace period. This run counts toward the existing four-attempt budget. If a
+hard crash or database outage prevents the retry update, lease expiry provides
+recovery. All replicas may run cleanup and the dead-letter outbox publisher;
+these operations must stay safe under concurrent execution.
+
+Log the container hostname as `worker_id` and include `job_id`, `video_id`, and
+`run_id` on claim and run completion. These fields are sufficient to verify
+distribution; full tracing remains Milestone 11.
+
+Before declaring M10 complete, prove the M9 reliability path with an actual
+uploaded MP4 and PostgreSQL, RabbitMQ, and MinIO. Then test simultaneous claims,
+duplicate delivery, overlapping jobs on three replicas, stale-run fencing,
+worker crash, graceful drain, drain timeout, concurrent cleanup, and one final
+logical result per video.
 
 ### Done when
-Tăng worker làm tăng throughput mà state vẫn đúng.
+Three replicas have distinct jobs running at the same time, every job reaches a
+valid final state without duplicate assets or final results, and all crash and
+shutdown cases above recover correctly. With nine separate 720p/30-second MP4
+uploads per trial on the same host with at least six available CPUs, run three
+trials each at one and three replicas. Measure from the first claim to the last
+completion. The median READY videos per minute at three replicas must be at
+least 1.5 times the one-replica median. Save machine configuration, worker logs,
+trial timings, and database checks with the acceptance report. A static test or
+unavailable Docker daemon does not satisfy this runtime gate.
 
 ## 13. Milestone 11 — Observability
 

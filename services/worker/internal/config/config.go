@@ -31,9 +31,9 @@ type Config struct {
 
 func Load() Config {
 	_ = godotenv.Load("../../.env", ".env")
-	seconds, err := strconv.Atoi(getenv("SHUTDOWN_TIMEOUT_SECONDS", "30"))
-	if err != nil || seconds <= 0 {
-		seconds = 30
+	seconds, err := strconv.Atoi(getenv("WORKER_SHUTDOWN_TIMEOUT_SECONDS", "120"))
+	if err != nil || seconds <= 0 || seconds > 120 {
+		seconds = 120
 	}
 	pathStyle, err := strconv.ParseBool(getenv("S3_USE_PATH_STYLE", "true"))
 	if err != nil {
