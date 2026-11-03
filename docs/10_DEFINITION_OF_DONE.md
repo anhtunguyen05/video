@@ -145,3 +145,16 @@ The strongest portfolio story is not:
 It is:
 
 > "I started with a smaller architecture, observed where processing had different scaling and reliability characteristics, then extracted that boundary and demonstrated the operational consequences."
+
+## 10. Planned AI subtitle extension
+
+These gates apply when implementing the post-MVP extension; they do not change
+the current video READY contract. See [AI subtitle design](21_AI_SUBTITLES.md).
+
+- [ ] Upload produces one recoverable subtitle job, independent of video READY.
+- [ ] Local multilingual ASR generates timed UTF-8 WebVTT for Vietnamese speech.
+- [ ] A browser can enable, disable and seek with the owner-authorized track.
+- [ ] No-audio, no-speech, failure, retry and duplicate delivery paths are tested.
+- [ ] Deletion during processing cannot resurrect a track or leave an orphan.
+- [ ] CPU/GPU, memory, disk, latency and caption quality are measured on the target host.
+- [ ] Unauthorized access, signed URL expiry and transcript log leakage are tested.

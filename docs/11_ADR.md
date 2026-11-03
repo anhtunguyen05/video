@@ -205,3 +205,26 @@ The platform can demonstrate:
 - multiple renditions
 - adaptive playback concepts
 - stream-oriented output rather than only static MP4 download
+
+---
+
+# ADR-009 — Local asynchronous AI subtitles
+
+## Status
+
+Proposed; not implemented.
+
+## Decision
+
+For the post-MVP subtitle increment, evaluate a separate Python worker using
+multilingual faster-whisper and a local model. Produce private WebVTT tracks
+after upload, independently of video READY. The API authorizes track discovery
+and access; the browser renders the completed track. Start with one concurrent
+job and benchmark `small` INT8 on the target host before selecting a model or
+GPU configuration. See [AI subtitle design](21_AI_SUBTITLES.md).
+
+## Consequences
+
+The deployment gains model storage, inference dependencies and CPU/GPU resource
+contention. Speech accuracy, subtitles' timing and runtime must be evaluated;
+no model training or third-party transcription API is required for this plan.

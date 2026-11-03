@@ -1,5 +1,9 @@
 # Testing and Local Development
 
+The planned local AI subtitle worker is not part of the current startup
+commands. Hardware guidance, test fixtures and acceptance checks for that
+extension are in [AI subtitle design](21_AI_SUBTITLES.md).
+
 ## 1. Dependencies
 
 Bắt buộc:

@@ -1,5 +1,9 @@
 # Data Model
 
+The planned AI subtitle extension needs independently persisted job and track
+state; no subtitle schema below is implemented by that proposal. See
+[AI subtitle design](21_AI_SUBTITLES.md) before designing its migration.
+
 PostgreSQL là system of record.
 
 ## 1. users

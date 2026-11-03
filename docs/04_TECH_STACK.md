@@ -1,5 +1,9 @@
 # Technical Stack
 
+Planned post-MVP extension: local multilingual speech recognition with a
+separate Python `faster-whisper` worker and WebVTT browser tracks. Model and
+hardware selection are subject to measurement; see [AI subtitle design](21_AI_SUBTITLES.md).
+
 ## 1. Frontend
 
 ### Next.js

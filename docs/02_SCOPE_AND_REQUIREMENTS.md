@@ -208,5 +208,17 @@ Optional after core completion:
 - CDN integration
 - worker autoscaling
 - Kubernetes
-- automatic subtitles
+- automatic AI subtitles for uploaded video, as described in [AI subtitle design](21_AI_SUBTITLES.md)
+
+### Planned subtitle extension (not implemented)
+
+- Generate timestamped Vietnamese WebVTT captions asynchronously using a local
+  speech recognition model after upload confirmation.
+- Expose subtitle status independently of video processing; playback remains
+  available if subtitles are pending or fail.
+- An authorized video owner can load and toggle a ready caption track. Handle
+  videos with no audio or no recognized speech without inventing captions.
+- Protect transcript access, bound retry and concurrency, and delete subtitle
+  objects when their video is deleted. Live captions, translation, speaker
+  identification and caption editing are outside the first increment.
 - waveform or preview clips

@@ -188,6 +188,10 @@ The project is successful when:
 
 ## 8. Local development
 
+Planned post-MVP AI subtitles for uploaded videos are described in
+[`docs/21_AI_SUBTITLES.md`](docs/21_AI_SUBTITLES.md); they are not yet part of
+the application or its startup commands.
+
 Prerequisites:
 
 - Go

@@ -1,5 +1,8 @@
 # API Specification
 
+Subtitle status and track access are proposed only; endpoint names and response
+schemas are not yet specified or implemented. See [AI subtitle design](21_AI_SUBTITLES.md).
+
 Base path:
 ```text
 /api/v1

@@ -434,3 +434,12 @@ Yêu cầu:
 ```
 
 Không thêm Kubernetes trước khi core processing và reliability hoạt động.
+
+## 16. Planned post-MVP AI subtitles
+
+Add an independently tracked asynchronous subtitle job after upload, a local
+multilingual ASR worker, private WebVTT output, owner-scoped API discovery and
+browser track selection. Video READY remains independent of subtitles. This is
+not implemented and does not replace the current milestone acceptance gates.
+Implementation stages, failure handling and acceptance are defined in
+[AI subtitle design](21_AI_SUBTITLES.md).

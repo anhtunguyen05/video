@@ -179,7 +179,6 @@ The following are explicitly outside the first major version:
 - video editing
 - collaborative editing
 - AI highlight extraction
-- automatic subtitles
 - recommendation algorithms
 - content moderation platform
 - monetization
@@ -187,3 +186,6 @@ The following are explicitly outside the first major version:
 - global multi-region delivery
 
 They can become later extensions.
+
+Automatic AI subtitles are a planned post-MVP extension, not a current
+capability or a requirement for video READY. See [AI subtitle design](21_AI_SUBTITLES.md).

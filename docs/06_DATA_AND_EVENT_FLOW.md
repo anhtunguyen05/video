@@ -1,5 +1,8 @@
 # Data and Event Flow
 
+For the proposed independent subtitle job and its separate delivery path, see
+[AI subtitle design](21_AI_SUBTITLES.md). It is not part of the current flow.
+
 ## 1. Upload flow
 
 ```text

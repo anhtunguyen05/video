@@ -203,7 +203,8 @@ Optional:
 
 Only after core project completion:
 
-- subtitles
+- AI subtitles for uploaded videos: local ASR, independent job status, WebVTT
+  playback and owner-scoped access ([design and acceptance](21_AI_SUBTITLES.md))
 - AI chapters
 - preview clips
 - waveform
