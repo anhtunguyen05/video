@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,6 +61,8 @@ func (realClock) Now() time.Time { return time.Now().UTC() }
 
 type eventEnvelope struct {
 	MessageID     string `json:"message_id"`
+	CorrelationID string `json:"correlation_id"`
+	Traceparent   string `json:"traceparent"`
 	MessageType   string `json:"message_type"`
 	SchemaVersion int    `json:"schema_version"`
 	OccurredAt    string `json:"occurred_at"`
@@ -129,6 +132,9 @@ func (service *Service) EnqueueVideoUploaded(ctx context.Context, body []byte) e
 	if err := service.repository.CreateQueued(ctx, job); err != nil {
 		return fmt.Errorf("create queued processing job: %w", err)
 	}
+	var event eventEnvelope
+	_ = json.Unmarshal(body, &event)
+	slog.Info("upload event enqueued", "event_id", event.MessageID, "correlation_id", event.CorrelationID, "video_id", job.VideoID)
 	return nil
 }
 
@@ -193,7 +199,9 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	if err != nil {
 		return fmt.Errorf("create processing source file: %w", err)
 	}
+	started := time.Now()
 	objectInfo, downloadErr := service.source.Download(ctx, job.SourceObjectKey, sourceFile)
+	logOperation(ctx, "storage.download", started, downloadErr)
 	closeErr := sourceFile.Close()
 	if downloadErr != nil {
 		if errors.Is(downloadErr, ports.ErrObjectNotFound) {
@@ -208,7 +216,9 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 		return fmt.Errorf("close processing source file: %w", closeErr)
 	}
 
+	started = time.Now()
 	metadata, err := service.probe.Probe(ctx, sourcePath)
+	logOperation(ctx, "ffprobe", started, err)
 	if err != nil {
 		if errors.Is(err, ports.ErrInvalidMedia) {
 			return service.markFailed(ctx, job, FailureInvalidMedia, "The uploaded media is invalid or missing a video stream.")
@@ -230,7 +240,10 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	}
 
 	thumbnailPath := filepath.Join(workDir, "thumbnail.jpg")
-	if err := service.thumbnail.Generate(ctx, sourcePath, thumbnailPath, thumbnailTimestamp(metadata.DurationMS)); err != nil {
+	started = time.Now()
+	thumbnailErr := service.thumbnail.Generate(ctx, sourcePath, thumbnailPath, thumbnailTimestamp(metadata.DurationMS))
+	logOperation(ctx, "ffmpeg.thumbnail", started, thumbnailErr)
+	if thumbnailErr != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -244,8 +257,10 @@ func (service *Service) process(ctx context.Context, job domain.Job) error {
 	if err != nil {
 		return service.markFailed(ctx, job, FailureThumbnail, "The video thumbnail output could not be opened.")
 	}
+	started = time.Now()
 	_, uploadErr := service.assets.Upload(ctx,
 		thumbnailObjectKey(job), "image/jpeg", thumbnailFile, thumbnailInfo.Size())
+	logOperation(ctx, "storage.upload.thumbnail", started, uploadErr)
 	closeThumbnailErr := thumbnailFile.Close()
 	if uploadErr != nil {
 		return fmt.Errorf("upload thumbnail: %w", uploadErr)
@@ -305,7 +320,10 @@ func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir 
 		if err := os.MkdirAll(variantDir, 0o700); err != nil {
 			return true, service.markHLSPackagingFailed(ctx, job)
 		}
-		if err := service.packager.PackageVariant(ctx, ports.HLSVariantRequest{InputPath: inputPath, OutputDir: variantDir}); err != nil {
+		started := time.Now()
+		packageErr := service.packager.PackageVariant(ctx, ports.HLSVariantRequest{InputPath: inputPath, OutputDir: variantDir})
+		logOperation(ctx, "ffmpeg.package", started, packageErr)
+		if packageErr != nil {
 			if ctx.Err() != nil {
 				return false, ctx.Err()
 			}
@@ -373,7 +391,9 @@ func (service *Service) packageHLS(ctx context.Context, job domain.Job, workDir 
 			cleanup()
 			return true, service.markHLSPackagingFailed(ctx, job)
 		}
+		started := time.Now()
 		info, uploadErr := service.assets.Upload(ctx, objectKey, hlsContentType(file), handle, fileBytes)
+		logOperation(ctx, "storage.upload.hls", started, uploadErr)
 		closeErr := handle.Close()
 		if uploadErr != nil || closeErr != nil {
 			cleanup()
@@ -485,12 +505,15 @@ func (service *Service) processRendition(ctx context.Context, job domain.Job, so
 		return false, fmt.Errorf("begin rendition %s: %w", rendition.Name, err)
 	}
 	outputPath := filepath.Join(workDir, rendition.Name+".mp4")
-	if err := service.transcoder.Transcode(ctx, ports.RenditionTranscodeRequest{
+	started := time.Now()
+	transcodeErr := service.transcoder.Transcode(ctx, ports.RenditionTranscodeRequest{
 		SourcePath: sourcePath,
 		OutputPath: outputPath,
 		Width:      rendition.Width,
 		Height:     rendition.Height,
-	}); err != nil {
+	})
+	logOperation(ctx, "ffmpeg.transcode", started, transcodeErr)
+	if transcodeErr != nil {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
@@ -505,7 +528,9 @@ func (service *Service) processRendition(ctx context.Context, job domain.Job, so
 		return true, service.markRenditionFailed(ctx, job, rendition, FailureTranscode, "The video rendition output could not be opened.")
 	}
 	objectKey := renditionObjectKey(job, rendition)
+	started = time.Now()
 	_, uploadErr := service.assets.Upload(ctx, objectKey, "video/mp4", outputFile, outputInfo.Size())
+	logOperation(ctx, "storage.upload.rendition", started, uploadErr)
 	closeErr := outputFile.Close()
 	if uploadErr != nil {
 		return false, fmt.Errorf("upload rendition %s: %w", rendition.Name, uploadErr)

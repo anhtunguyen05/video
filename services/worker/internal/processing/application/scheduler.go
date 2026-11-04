@@ -2,9 +2,14 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"log/slog"
 	"time"
+	"video/services/worker/internal/platform/observability"
 
 	"video/services/worker/internal/processing/domain"
 	"video/services/worker/internal/processing/ports"
@@ -43,12 +48,17 @@ func (service *Service) runDue(claimCtx, workCtx context.Context, logger *slog.L
 	if err != nil || !claimed {
 		return err
 	}
+	var event eventEnvelope
+	_ = json.Unmarshal(job.OriginalMessage, &event)
+	logger = logger.With("event_id", event.MessageID, "correlation_id", event.CorrelationID, "job_id", job.ID, "video_id", job.VideoID, "run_id", job.RunID)
+	workCtx = observability.Extract(workCtx, event.Traceparent)
+	workCtx, span := otel.Tracer("video/worker").Start(workCtx, "processing.run")
+	defer span.End()
+	workCtx = context.WithValue(workCtx, operationLoggerKey{}, logger)
 	started := time.Now()
-	logger.Info("processing job claimed", "job_id", job.ID, "video_id", job.VideoID,
-		"run_id", job.RunID, "attempt", job.Attempt)
+	logger.Info("processing job claimed", "attempt", job.Attempt)
 	err = service.runClaimed(workCtx, job)
-	logger.Info("processing run ended", "job_id", job.ID, "video_id", job.VideoID,
-		"run_id", job.RunID, "duration_ms", time.Since(started).Milliseconds(), "error", err)
+	logger.Info("processing run ended", "duration_ms", time.Since(started).Milliseconds(), "error", err)
 	return err
 }
 
@@ -136,4 +146,23 @@ func (service *Service) cleanupRuns(ctx context.Context, logger *slog.Logger, cl
 			logger.Error("mark failed processing run cleaned", "run_id", run.ID, "error", err)
 		}
 	}
+}
+
+type operationLoggerKey struct{}
+
+func logOperation(ctx context.Context, operation string, started time.Time, err error) {
+	logger, _ := ctx.Value(operationLoggerKey{}).(*slog.Logger)
+	if logger == nil {
+		return
+	}
+	_, span := otel.Tracer("video/worker").Start(ctx, operation, trace.WithTimestamp(started))
+	if err != nil {
+		span.SetStatus(codes.Error, "operation failed")
+	}
+	span.End()
+	result := "ok"
+	if err != nil {
+		result = "error"
+	}
+	logger.Info("processing operation", "operation", operation, "duration_ms", time.Since(started).Milliseconds(), "result", result)
 }

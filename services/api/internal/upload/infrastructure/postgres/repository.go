@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"video/services/api/internal/platform/observability"
 	platformpostgres "video/services/api/internal/platform/postgres"
 	uploaddomain "video/services/api/internal/upload/domain"
 	"video/services/api/internal/upload/ports"
@@ -101,7 +102,8 @@ func (repository *Repository) CompleteOwned(ctx context.Context, ownerID, upload
 				jsonb_build_object(
 					'message_id', e.event_id, 'message_type', 'video.uploaded.v1',
 					'schema_version', 1, 'occurred_at', $4,
-					'correlation_id', e.video_id::text, 'causation_id', e.id::text,
+					'correlation_id', COALESCE(NULLIF($5, ''), e.video_id::text), 'causation_id', e.id::text,
+                    'traceparent', $6::text,
 					'payload', jsonb_build_object('video_id', e.video_id,
 						'owner_id', $2::uuid, 'source_object_key', e.object_key,
 						'processing_version', e.processing_version))
@@ -114,7 +116,7 @@ func (repository *Repository) CompleteOwned(ctx context.Context, ownerID, upload
 			e.completed_size_bytes, e.expires_at, e.completed_at,
 			e.created_at, e.updated_at
 		FROM event_identity e
-	`, uploadID, ownerID, sizeBytes, now)
+	`, uploadID, ownerID, sizeBytes, now, observability.RequestID(ctx), observability.Traceparent(ctx))
 	session, err := scanSession(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return uploaddomain.Session{}, ports.ErrNotFound

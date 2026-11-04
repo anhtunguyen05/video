@@ -3,10 +3,15 @@ package rabbitmq
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"log/slog"
 	"time"
+	"video/services/api/internal/platform/observability"
 
 	"github.com/rabbitmq/amqp091-go"
 )
@@ -70,7 +75,18 @@ func (publisher *Publisher) publishNext(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("claim upload outbox: %w", err)
 	}
-	if err := publisher.publishConfirmed(ctx, event); err != nil {
+	var envelope struct {
+		Traceparent string `json:"traceparent"`
+	}
+	_ = json.Unmarshal(event.body, &envelope)
+	traceCtx := observability.Extract(ctx, envelope.Traceparent)
+	_, publishSpan := otel.Tracer("video/api").Start(traceCtx, "rabbitmq.publish", trace.WithSpanKind(trace.SpanKindProducer))
+	publishErr := publisher.publishConfirmed(ctx, event)
+	if publishErr != nil {
+		publishSpan.SetStatus(codes.Error, "publish failed")
+	}
+	publishSpan.End()
+	if err := publishErr; err != nil {
 		_, updateErr := db.ExecContext(ctx, `
 			UPDATE outbox_events SET attempt_count = attempt_count + 1,
 				next_attempt_at = now() + make_interval(secs => LEAST(300, power(2, LEAST(attempt_count + 1, 8))::integer)),
@@ -84,6 +100,14 @@ func (publisher *Publisher) publishNext(ctx context.Context, db *sql.DB) error {
 		}
 		return nil
 	}
+	var identity struct {
+		CorrelationID string `json:"correlation_id"`
+		Payload       struct {
+			VideoID string `json:"video_id"`
+		} `json:"payload"`
+	}
+	_ = json.Unmarshal(event.body, &identity)
+	slog.Info("upload event published", "event_id", event.id, "correlation_id", identity.CorrelationID, "video_id", identity.Payload.VideoID)
 	_, err = db.ExecContext(ctx, `UPDATE outbox_events SET published_at = now(), locked_until = NULL WHERE id = $1`, event.id)
 	return err
 }

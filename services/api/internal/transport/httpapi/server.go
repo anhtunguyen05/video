@@ -3,6 +3,9 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"net/http"
 	"os"
 	"time"
@@ -12,6 +15,7 @@ import (
 	mediaPorts "video/services/api/internal/media/ports"
 	platformauth "video/services/api/internal/platform/auth"
 	"video/services/api/internal/platform/ids"
+	"video/services/api/internal/platform/observability"
 	"video/services/api/internal/platform/postgres"
 )
 
@@ -92,7 +96,10 @@ func withRequestID(next http.Handler) http.Handler {
 			requestID, _ = ids.NewUUID()
 		}
 		writer.Header().Set("X-Request-ID", requestID)
-		next.ServeHTTP(writer, request)
+		ctx := otel.GetTextMapPropagator().Extract(request.Context(), propagation.HeaderCarrier(request.Header))
+		ctx, span := otel.Tracer("video/api").Start(ctx, "http.request", trace.WithSpanKind(trace.SpanKindServer))
+		defer span.End()
+		next.ServeHTTP(writer, request.WithContext(observability.WithRequestID(ctx, requestID)))
 	})
 }
 

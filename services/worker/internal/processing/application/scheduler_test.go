@@ -1,12 +1,20 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
+	"video/services/worker/internal/platform/observability"
 
 	"github.com/google/uuid"
 	"video/services/worker/internal/processing/domain"
@@ -119,5 +127,52 @@ func TestClassifyProcessingError(t *testing.T) {
 				t.Fatalf("classify = %s/%v, want %s/%v", code, retry, tc.code, tc.retry)
 			}
 		})
+	}
+}
+
+func TestOperationLogsCarryJobIdentityWithoutErrorDetails(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil)).With("event_id", "event-1", "correlation_id", "request-1", "job_id", "job-1", "video_id", "video-1", "run_id", "run-1")
+	ctx := context.WithValue(context.Background(), operationLoggerKey{}, logger)
+	logOperation(ctx, "storage.download", time.Now(), errors.New("sensitive source path"))
+	for _, expected := range []string{"event-1", "request-1", "job-1", "video-1", "run-1", "storage.download", `"result":"error"`} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("missing %q in %s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "sensitive source path") {
+		t.Error("error detail leaked into operation log")
+	}
+}
+
+func TestTraceContextAndOperationSpan(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	defer func() {
+		otel.SetTracerProvider(previous)
+		otel.SetTextMapPropagator(previousPropagator)
+		_ = provider.Shutdown(context.Background())
+	}()
+	parent, root := otel.Tracer("test").Start(context.Background(), "upload")
+	encoded := observability.Traceparent(parent)
+	if encoded == "" {
+		t.Fatal("missing traceparent")
+	}
+	workerCtx := observability.Extract(context.Background(), encoded)
+	workerCtx, run := otel.Tracer("test").Start(workerCtx, "processing.run")
+	workerCtx = context.WithValue(workerCtx, operationLoggerKey{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	logOperation(workerCtx, "ffmpeg.transcode", time.Now(), errors.New("failed"))
+	run.End()
+	root.End()
+	spans := exporter.GetSpans()
+	if len(spans) != 3 {
+		t.Fatalf("got %d spans", len(spans))
+	}
+	if spans[0].Name != "ffmpeg.transcode" || spans[0].Status.Code != codes.Error || spans[0].SpanContext.TraceID() != spans[2].SpanContext.TraceID() || spans[0].Parent.SpanID() != spans[1].SpanContext.SpanID() {
+		t.Fatalf("unexpected span hierarchy: %+v", spans)
 	}
 }
