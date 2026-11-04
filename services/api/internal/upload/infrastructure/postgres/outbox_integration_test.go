@@ -10,6 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"video/services/api/internal/platform/observability"
 )
 
 func TestCompleteUploadCommitsOneOutboxEvent(t *testing.T) {
@@ -41,7 +44,13 @@ func TestCompleteUploadCommitsOneOutboxEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	repository := NewRepository(db)
-	session, err := repository.CompleteOwned(ctx, ownerID, uploadID, 1024, now)
+	requestID := uuid.NewString()
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previousPropagator) })
+	traceparent := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	requestCtx := observability.Extract(ctx, traceparent)
+	session, err := repository.CompleteOwned(observability.WithRequestID(requestCtx, requestID), ownerID, uploadID, 1024, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,8 +67,10 @@ func TestCompleteUploadCommitsOneOutboxEvent(t *testing.T) {
 		t.Fatalf("outbox events = %d", count)
 	}
 	var event struct {
-		MessageID string `json:"message_id"`
-		Payload   struct {
+		MessageID     string `json:"message_id"`
+		CorrelationID string `json:"correlation_id"`
+		Traceparent   string `json:"traceparent"`
+		Payload       struct {
 			VideoID           string `json:"video_id"`
 			OwnerID           string `json:"owner_id"`
 			SourceObjectKey   string `json:"source_object_key"`
@@ -69,7 +80,7 @@ func TestCompleteUploadCommitsOneOutboxEvent(t *testing.T) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.MessageID == "" || event.Payload.VideoID != videoID || event.Payload.OwnerID != ownerID ||
+	if event.MessageID == "" || event.CorrelationID != requestID || event.Traceparent != traceparent || event.Payload.VideoID != videoID || event.Payload.OwnerID != ownerID ||
 		event.Payload.SourceObjectKey != key || event.Payload.ProcessingVersion != 1 {
 		t.Fatalf("unexpected outbox payload: %s", payload)
 	}

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -77,6 +78,7 @@ func (s *Server) completeUpload(writer http.ResponseWriter, request *http.Reques
 		writeCompleteUploadError(writer, request, err)
 		return
 	}
+	slog.Info("upload completed", "request_id", writer.Header().Get("X-Request-ID"), "video_id", result.VideoID)
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]string{
 		"video_id": result.VideoID,
 		"status":   string(result.Status),

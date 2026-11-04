@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
+	"video/services/api/internal/platform/observability"
 
 	"video/services/api/internal/config"
 	mediaapplication "video/services/api/internal/media/application"
@@ -22,7 +24,20 @@ import (
 )
 
 func main() {
-	logger := logging.New()
+	logger := logging.New().With("service", "api")
+	slog.SetDefault(logger)
+	shutdownTrace, err := observability.Initialize(context.Background(), "api")
+	if err != nil {
+		logger.Error("initialize tracing", "error", err)
+		return
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTrace(ctx); err != nil {
+			logger.Error("shutdown tracing", "error", err)
+		}
+	}()
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("load config", "error", err)

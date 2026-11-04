@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
+	"video/services/worker/internal/platform/observability"
 
 	"video/services/worker/internal/config"
 	"video/services/worker/internal/platform/logging"
@@ -25,7 +27,20 @@ func main() {
 	if err != nil || workerID == "" {
 		workerID = "unknown"
 	}
-	logger = logger.With("worker_id", workerID)
+	logger = logger.With("service", "worker", "worker_id", workerID)
+	slog.SetDefault(logger)
+	shutdownTrace, err := observability.Initialize(context.Background(), "worker")
+	if err != nil {
+		logger.Error("initialize tracing", "error", err)
+		return
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTrace(ctx); err != nil {
+			logger.Error("shutdown tracing", "error", err)
+		}
+	}()
 	cfg := config.Load()
 	if _, err := exec.LookPath(cfg.FFProbePath); err != nil {
 		logger.Error("ffprobe executable is unavailable", "path", cfg.FFProbePath, "error", err)

@@ -2,8 +2,13 @@ package rabbitmq
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"video/services/worker/internal/platform/observability"
 
 	"github.com/rabbitmq/amqp091-go"
 	processingapplication "video/services/worker/internal/processing/application"
@@ -62,7 +67,17 @@ func (consumer *Consumer) Run(ctx context.Context, service *processingapplicatio
 		return fmt.Errorf("consume RabbitMQ messages: %w", err)
 	}
 	for delivery := range deliveries {
-		err := service.EnqueueVideoUploaded(ctx, delivery.Body)
+		var envelope struct {
+			Traceparent string `json:"traceparent"`
+		}
+		_ = json.Unmarshal(delivery.Body, &envelope)
+		parent := observability.Extract(ctx, envelope.Traceparent)
+		consumeCtx, span := otel.Tracer("video/worker").Start(parent, "rabbitmq.consume", trace.WithSpanKind(trace.SpanKindConsumer))
+		err := service.EnqueueVideoUploaded(consumeCtx, delivery.Body)
+		if err != nil {
+			span.SetStatus(codes.Error, "enqueue failed")
+		}
+		span.End()
 		if err == nil {
 			if ackErr := delivery.Ack(false); ackErr != nil {
 				return fmt.Errorf("ack RabbitMQ message: %w", ackErr)

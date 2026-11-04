@@ -50,12 +50,22 @@ services:
       retries: 10
       start_period: 5s
 
+  jaeger:
+    profiles: ["observability"]
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+
   worker:
     build:
       context: ../../services/worker
       dockerfile: Dockerfile
     environment:
       APP_ENV: ${APP_ENV:-local}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       S3_ENDPOINT: http://minio:9000

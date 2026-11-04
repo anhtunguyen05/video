@@ -20,6 +20,7 @@
     "occurred_at": { "type": "string", "format": "date-time" },
     "correlation_id": { "type": "string" },
     "causation_id": { "type": "string" },
+    "traceparent": { "type": "string" },
     "payload": {
       "type": "object",
       "additionalProperties": false,
