@@ -27,6 +27,7 @@ type Config struct {
 	TranscodeCRF        int
 	ProcessingTempDir   string
 	ShutdownTimeout     time.Duration
+	ConsumeUploads      bool
 }
 
 func Load() Config {
@@ -38,6 +39,10 @@ func Load() Config {
 	pathStyle, err := strconv.ParseBool(getenv("S3_USE_PATH_STYLE", "true"))
 	if err != nil {
 		pathStyle = true
+	}
+	consumeUploads, err := strconv.ParseBool(getenv("WORKER_CONSUME_UPLOADS", "true"))
+	if err != nil {
+		consumeUploads = true
 	}
 	return Config{
 		AppEnv:              getenv("APP_ENV", "local"),
@@ -58,6 +63,7 @@ func Load() Config {
 		TranscodeCRF:        crf("TRANSCODE_CRF", 23),
 		ProcessingTempDir:   getenv("PROCESSING_TEMP_DIR", ""),
 		ShutdownTimeout:     time.Duration(seconds) * time.Second,
+		ConsumeUploads:      consumeUploads,
 	}
 }
 

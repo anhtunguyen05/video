@@ -15,3 +15,17 @@ func TestWorkerDrainNeverExceedsComposeGraceBudget(t *testing.T) {
 		t.Fatalf("short drain timeout = %s, want 5s", got)
 	}
 }
+
+func TestWorkerUploadConsumerConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"", true}, {"true", true}, {"false", false}, {"invalid", true}} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("WORKER_CONSUME_UPLOADS", tc.value)
+			if got := Load().ConsumeUploads; got != tc.want {
+				t.Fatalf("ConsumeUploads = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

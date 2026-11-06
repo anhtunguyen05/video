@@ -24,7 +24,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -59,12 +59,30 @@ services:
       - "127.0.0.1:16686:16686"
       - "127.0.0.1:4318:4318"
 
+  processing-service:
+    build:
+      context: ../../services/worker
+      dockerfile: Dockerfile
+    command: ["/usr/local/bin/processing-service"]
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   worker:
     build:
       context: ../../services/worker
       dockerfile: Dockerfile
     environment:
       APP_ENV: ${APP_ENV:-local}
+      WORKER_CONSUME_UPLOADS: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
@@ -84,6 +102,8 @@ services:
       PROCESSING_TEMP_DIR: /tmp/video-processing
       WORKER_SHUTDOWN_TIMEOUT_SECONDS: ${WORKER_SHUTDOWN_TIMEOUT_SECONDS:-120}
     depends_on:
+      processing-service:
+        condition: service_started
       postgres:
         condition: service_healthy
       rabbitmq:
