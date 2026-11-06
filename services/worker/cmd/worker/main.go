@@ -57,12 +57,15 @@ func main() {
 	}
 	defer db.Close()
 
-	consumer, err := rabbitmq.NewConsumer(cfg.RabbitMQURL)
-	if err != nil {
-		logger.Error("create RabbitMQ consumer", "error", err)
-		return
+	var consumer *rabbitmq.Consumer
+	if cfg.ConsumeUploads {
+		consumer, err = rabbitmq.NewConsumer(cfg.RabbitMQURL)
+		if err != nil {
+			logger.Error("create RabbitMQ consumer", "error", err)
+			return
+		}
+		defer consumer.Close()
 	}
-	defer consumer.Close()
 	deadPublisher, err := rabbitmq.NewDeadPublisher(cfg.RabbitMQURL)
 	if err != nil {
 		logger.Error("create dead-letter publisher", "error", err)
@@ -124,14 +127,20 @@ func main() {
 		}
 	}()
 	logger.Info("worker started", "env", cfg.AppEnv, "queue", rabbitmq.QueueName)
-	if err := consumer.Run(ctx, processingService); err != nil {
-		logger.Error("worker consumer stopped", "error", err)
+	if consumer != nil {
+		if err := consumer.Run(ctx, processingService); err != nil {
+			logger.Error("worker consumer stopped", "error", err)
+		}
+	} else {
+		<-ctx.Done()
 	}
 	stop()
 	// Release any unacknowledged delivery before waiting for the active job.
 	// Its event can then be consumed by another replica during this drain.
-	if err := consumer.Close(); err != nil {
-		logger.Error("close worker consumer", "error", err)
+	if consumer != nil {
+		if err := consumer.Close(); err != nil {
+			logger.Error("close worker consumer", "error", err)
+		}
 	}
 	logger.Info("worker draining")
 	drainScheduler(schedulerDone, cancelWork, cfg.ShutdownTimeout, 15*time.Second, logger)

@@ -397,6 +397,22 @@ Có thể trace một processing job từ API → RabbitMQ → Worker → FFmpeg
 
 Chỉ bắt đầu sau khi flow chính ổn.
 
+Implementation status: **in progress**. Compose runs upload-event ingestion in
+`processing-service` and disables ingestion in its worker containers. Direct
+local worker runs keep ingestion enabled by default; set
+`WORKER_CONSUME_UPLOADS=false` when running a separate processing service.
+Both processes currently use the existing shared database and the worker still
+writes media tables. Independent data ownership, result events and media-side
+projection are not implemented, so this does not yet satisfy M12.
+
+Local smoke check (2026-11-05): an isolated Compose project with migrations
+1–8 processed a generated 640×360, two-second MP4 through the separate event
+consumer and worker to READY; the HLS master endpoint returned HTTP 200. Two
+processing-service replicas also ran without recreating the worker. This is
+not the M9/M10 reliability or throughput acceptance and does not prove
+independent data ownership. The disposable project requires migrations before
+the worker can run successfully.
+
 ```text
 Next.js
    |
