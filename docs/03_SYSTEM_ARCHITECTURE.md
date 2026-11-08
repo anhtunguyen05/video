@@ -286,12 +286,13 @@ Final readiness should be derived from completed pipeline state.
 
 The project should explicitly accept eventual consistency where appropriate.
 
-## 8. Planned asynchronous subtitle path
+## 8. Asynchronous subtitle path
 
-After upload confirmation, a separate subtitle job can run alongside media
-processing. A local ASR worker reads the private source from object storage,
+After an opted-in upload is confirmed, a separate subtitle job can run alongside
+media processing. A local ASR worker reads the private source from object storage,
 generates WebVTT, and publishes its independently tracked result. The Go API
-authorizes status and caption access; the Next.js player fetches the finished
-track. Neither the browser nor the playback request runs the model, and video
-READY does not depend on subtitle success. This path is not implemented; see
-[AI subtitle design](21_AI_SUBTITLES.md) for delivery and lifecycle details.
+authorizes status and caption access; the Next.js player fetches the complete
+track; partial/live captions are not in the first increment. Neither
+the browser nor the playback request runs the model, and video
+READY does not depend on subtitle success. See [AI subtitle design](21_AI_SUBTITLES.md)
+for the implementation, acceptance status and lifecycle details.

@@ -15,11 +15,12 @@ COMPOSE_FILE ?= compose.yaml
 COMPOSE := docker compose -f $(COMPOSE_FILE)
 WORKER_REPLICAS ?= 3
 
-.PHONY: help test test-unit test-integration lint fmt build dev-infra-up dev-infra-down \
+.PHONY: help test test-unit test-python test-integration lint fmt build dev-infra-up dev-infra-down \
 	api worker worker-docker worker-scale web migrate-up migrate-down
 
 help:
 	@echo make test              Run available tests
+	@echo make test-python       Run subtitle Python tests
 	@echo make lint              Run available linters
 	@echo make fmt               Format Go and frontend sources
 	@echo make build             Build available applications
@@ -36,6 +37,10 @@ test-unit:
 	cd services/api && go test ./...
 	cd services/worker && go test ./...
 	cd apps/web && npm test
+	$(MAKE) test-python
+
+test-python:
+	cd services/subtitles && python -B -m unittest discover -s tests -v
 
 test-integration:
 	@echo 'No integration tests yet; skipping.'

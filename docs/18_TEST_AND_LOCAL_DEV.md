@@ -1,8 +1,8 @@
 # Testing and Local Development
 
-The planned local AI subtitle worker is not part of the current startup
-commands. Hardware guidance, test fixtures and acceptance checks for that
-extension are in [AI subtitle design](21_AI_SUBTITLES.md).
+The optional local AI subtitle worker uses a separate Compose profile and model
+provisioning step; see [subtitle setup](../services/subtitles/README.md). Hardware
+guidance and acceptance checks are in [AI subtitle design](21_AI_SUBTITLES.md).
 
 ## 1. Dependencies
 
@@ -48,9 +48,9 @@ Host:
 APP_ENV=local
 API_PORT=8080
 
-DATABASE_URL=postgres://video:video@localhost:5432/video?sslmode=disable
+DATABASE_URL=postgres://video:video@localhost:55439/video?sslmode=disable
 
-RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+RABBITMQ_URL=amqp://guest:guest@localhost:56739/
 
 S3_ENDPOINT=http://localhost:9000
 S3_REGION=us-east-1

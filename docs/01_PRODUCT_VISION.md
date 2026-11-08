@@ -187,5 +187,5 @@ The following are explicitly outside the first major version:
 
 They can become later extensions.
 
-Automatic AI subtitles are a planned post-MVP extension, not a current
-capability or a requirement for video READY. See [AI subtitle design](21_AI_SUBTITLES.md).
+AI subtitles are an optional post-MVP extension and are not a requirement for
+video READY. See [AI subtitle design](21_AI_SUBTITLES.md) for acceptance status.

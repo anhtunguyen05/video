@@ -16,20 +16,40 @@ import (
 )
 
 type fakeUploadService struct {
-	createdResult  uploadapplication.CreateResult
-	createdErr     error
-	completeResult uploadapplication.CompleteResult
-	completeErr    error
-	abortErr       error
-	ownerID        string
-	videoID        string
-	uploadID       string
+	createdResult     uploadapplication.CreateResult
+	createdErr        error
+	completeResult    uploadapplication.CompleteResult
+	completeErr       error
+	abortErr          error
+	ownerID           string
+	videoID           string
+	uploadID          string
+	generateSubtitles bool
 }
 
-func (service *fakeUploadService) Create(_ context.Context, ownerID, videoID, _ string, _ int64) (uploadapplication.CreateResult, error) {
+func (service *fakeUploadService) Create(_ context.Context, ownerID, videoID, _ string, _ int64, generateSubtitles bool) (uploadapplication.CreateResult, error) {
 	service.ownerID = ownerID
 	service.videoID = videoID
+	service.generateSubtitles = generateSubtitles
 	return service.createdResult, service.createdErr
+}
+
+func TestCreateUploadSubtitleChoice(t *testing.T) {
+	for _, test := range []struct {
+		body string
+		want bool
+	}{
+		{`{"content_type":"video/mp4","size_bytes":80}`, false},
+		{`{"content_type":"video/mp4","size_bytes":80,"generate_subtitles":true}`, true},
+	} {
+		service := &fakeUploadService{}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/videos/00000000-0000-4000-8000-000000000002/uploads", strings.NewReader(test.body))
+		recorder := httptest.NewRecorder()
+		newUploadServer(service).Handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated || service.generateSubtitles != test.want {
+			t.Fatalf("body %s: status = %d, choice = %v", test.body, recorder.Code, service.generateSubtitles)
+		}
+	}
 }
 
 func (service *fakeUploadService) Complete(_ context.Context, ownerID, uploadID string) (uploadapplication.CompleteResult, error) {

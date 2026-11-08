@@ -453,9 +453,11 @@ Không thêm Kubernetes trước khi core processing và reliability hoạt đ�
 
 ## 16. Planned post-MVP AI subtitles
 
-Add an independently tracked asynchronous subtitle job after upload, a local
-multilingual ASR worker, private WebVTT output, owner-scoped API discovery and
-browser track selection. Video READY remains independent of subtitles. This is
-not implemented and does not replace the current milestone acceptance gates.
+Offer an upload option for AI subtitles, off by default. For opted-in uploads,
+add an independently tracked asynchronous subtitle job, a local multilingual ASR
+worker, complete private WebVTT output, owner-scoped API discovery and browser
+track selection. No live or partial captions are exposed. Video READY remains
+independent of subtitles. The initial path is implemented but acceptance remains
+incomplete; it does not replace the current milestone acceptance gates.
 Implementation stages, failure handling and acceptance are defined in
 [AI subtitle design](21_AI_SUBTITLES.md).

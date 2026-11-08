@@ -90,6 +90,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go uploadRabbitMQ.RunOutboxLoop(ctx, db, cfg.RabbitMQURL, logger)
+	go uploadRabbitMQ.RunSubtitleResultLoop(ctx, db, cfg.RabbitMQURL, logger)
 	select {
 	case err := <-serverErr:
 		if !errors.Is(err, http.ErrServerClosed) {

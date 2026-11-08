@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	ExchangeName = "video.events"
-	QueueName    = "processing.video-uploaded.v1"
-	RoutingKey   = "video.uploaded.v1"
+	ExchangeName       = "video.events"
+	QueueName          = "processing.video-uploaded.v1"
+	RoutingKey         = "video.uploaded.v1"
+	SubtitleQueueName  = "subtitles.requested.v1"
+	SubtitleRoutingKey = "subtitle.requested.v1"
 )
 
 type Publisher struct {
@@ -60,6 +62,16 @@ func NewPublisher(url string) (*Publisher, error) {
 		_ = channel.Close()
 		_ = connection.Close()
 		return nil, fmt.Errorf("bind RabbitMQ queue: %w", err)
+	}
+	if _, err := channel.QueueDeclare(SubtitleQueueName, true, false, false, false, nil); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+		return nil, fmt.Errorf("declare subtitle queue: %w", err)
+	}
+	if err := channel.QueueBind(SubtitleQueueName, SubtitleRoutingKey, ExchangeName, false, nil); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+		return nil, fmt.Errorf("bind subtitle queue: %w", err)
 	}
 	if err := channel.Confirm(false); err != nil {
 		_ = channel.Close()
