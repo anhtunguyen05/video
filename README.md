@@ -188,9 +188,9 @@ The project is successful when:
 
 ## 8. Local development
 
-Planned post-MVP AI subtitles for uploaded videos are described in
-[`docs/21_AI_SUBTITLES.md`](docs/21_AI_SUBTITLES.md); they are not yet part of
-the application or its startup commands.
+AI subtitles are an optional local extension with pending acceptance checks.
+Setup is in [`services/subtitles/README.md`](services/subtitles/README.md) and
+the design and verification status are in [`docs/21_AI_SUBTITLES.md`](docs/21_AI_SUBTITLES.md).
 
 Prerequisites:
 
@@ -210,6 +210,11 @@ Start PostgreSQL, RabbitMQ and MinIO:
 ~~~bash
 make dev-infra-up
 ~~~
+
+The default host ports are PostgreSQL `55439`, RabbitMQ `56739`, and RabbitMQ
+management `15639`; container-to-container connections continue to use `5432`
+and `5672`. Keep `DATABASE_URL`, `POSTGRES_HOST_PORT`, and `RABBITMQ_URL` in
+`.env` consistent if changing these ports.
 
 The web app uploads supported MP4/WebM files directly to MinIO through a
 short-lived presigned URL. Local browser uploads expect the web origin in

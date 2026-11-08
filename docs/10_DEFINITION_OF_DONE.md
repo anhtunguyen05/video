@@ -151,9 +151,12 @@ It is:
 These gates apply when implementing the post-MVP extension; they do not change
 the current video READY contract. See [AI subtitle design](21_AI_SUBTITLES.md).
 
-- [ ] Upload produces one recoverable subtitle job, independent of video READY.
+- [ ] The upload option defaults off; opt-out creates no subtitle job or inference.
+- [ ] Opted-in upload completion produces one recoverable subtitle job despite
+  retries, independent of video READY.
 - [ ] Local multilingual ASR generates timed UTF-8 WebVTT for Vietnamese speech.
 - [ ] A browser can enable, disable and seek with the owner-authorized track.
+- [ ] Only the complete validated track is exposed; no live or partial captions.
 - [ ] No-audio, no-speech, failure, retry and duplicate delivery paths are tested.
 - [ ] Deletion during processing cannot resurrect a track or leave an orphan.
 - [ ] CPU/GPU, memory, disk, latency and caption quality are measured on the target host.

@@ -1,7 +1,8 @@
 # Events and Jobs
 
-The planned subtitle job requires independent durable routing and a versioned
-contract, neither of which exists yet. See [AI subtitle design](21_AI_SUBTITLES.md).
+Subtitle requests and results use independent durable routing and versioned
+messages. See [AI subtitle design](21_AI_SUBTITLES.md) for current contracts and
+acceptance limits.
 
 RabbitMQ dùng cho asynchronous processing.
 

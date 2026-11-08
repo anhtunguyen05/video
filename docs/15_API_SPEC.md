@@ -1,7 +1,8 @@
 # API Specification
 
-Subtitle status and track access are proposed only; endpoint names and response
-schemas are not yet specified or implemented. See [AI subtitle design](21_AI_SUBTITLES.md).
+Owner-scoped subtitle status and track endpoints and their processing path are
+implemented; real-model and browser acceptance remain open. See
+[AI subtitle design](21_AI_SUBTITLES.md).
 
 Base path:
 ```text
@@ -162,9 +163,13 @@ Request:
 ```json
 {
   "content_type": "video/mp4",
-  "size_bytes": 104857600
+  "size_bytes": 104857600,
+  "generate_subtitles": false
 }
 ```
+
+`generate_subtitles` is optional and defaults to false. Enabling it creates an
+asynchronous Vietnamese subtitle request on successful upload completion.
 
 Response:
 ```json

@@ -5,6 +5,7 @@ import type {
   UploadEnvelope,
   UploadSession,
   PlaybackEnvelope,
+  SubtitleEnvelope,
   VideoEnvelope,
   VideoListEnvelope,
 } from "@/types/video";
@@ -74,6 +75,10 @@ export async function listVideos(): Promise<VideoListEnvelope> {
 
 export async function getVideo(videoId: string): Promise<VideoEnvelope> {
   return request<VideoEnvelope>(`/videos/${encodeURIComponent(videoId)}`);
+}
+
+export async function getSubtitles(videoId: string): Promise<SubtitleEnvelope> {
+  return request<SubtitleEnvelope>(`/videos/${encodeURIComponent(videoId)}/subtitles`);
 }
 
 export async function getPlayback(videoId: string): Promise<PlaybackEnvelope> {

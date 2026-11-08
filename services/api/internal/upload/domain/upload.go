@@ -29,6 +29,7 @@ type Session struct {
 	Status              Status
 	ExpectedContentType string
 	ExpectedSizeBytes   int64
+	GenerateSubtitles   bool
 	CompletedSizeBytes  *int64
 	ExpiresAt           time.Time
 	CompletedAt         *time.Time

@@ -12,14 +12,15 @@ import (
 )
 
 type UploadService interface {
-	Create(context.Context, string, string, string, int64) (uploadapplication.CreateResult, error)
+	Create(context.Context, string, string, string, int64, bool) (uploadapplication.CreateResult, error)
 	Complete(context.Context, string, string) (uploadapplication.CompleteResult, error)
 	Abort(context.Context, string, string) error
 }
 
 type createUploadRequest struct {
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
+	ContentType       string `json:"content_type"`
+	SizeBytes         int64  `json:"size_bytes"`
+	GenerateSubtitles bool   `json:"generate_subtitles"`
 }
 
 type uploadResponse struct {
@@ -50,7 +51,7 @@ func (s *Server) createUpload(writer http.ResponseWriter, request *http.Request)
 		writeAPIError(writer, request, http.StatusBadRequest, "INVALID_REQUEST", "The request body is invalid.")
 		return
 	}
-	result, err := s.uploads.Create(request.Context(), principal.ID, videoID, payload.ContentType, payload.SizeBytes)
+	result, err := s.uploads.Create(request.Context(), principal.ID, videoID, payload.ContentType, payload.SizeBytes, payload.GenerateSubtitles)
 	if err != nil {
 		writeCreateUploadError(writer, request, err)
 		return

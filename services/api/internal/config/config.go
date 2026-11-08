@@ -54,8 +54,8 @@ func Load() (Config, error) {
 	return Config{
 		AppEnv:                 getenv("APP_ENV", "local"),
 		HTTPAddr:               ":" + port,
-		DatabaseURL:            getenv("DATABASE_URL", "postgres://video:video@localhost:5432/video?sslmode=disable"),
-		RabbitMQURL:            getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		DatabaseURL:            getenv("DATABASE_URL", "postgres://video:video@localhost:55439/video?sslmode=disable"),
+		RabbitMQURL:            getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:56739/"),
 		DevUserID:              getenv("DEV_USER_ID", "00000000-0000-4000-8000-000000000001"),
 		ShutdownTimeout:        time.Duration(shutdownSeconds) * time.Second,
 		S3Endpoint:             getenv("S3_ENDPOINT", "http://localhost:9000"),

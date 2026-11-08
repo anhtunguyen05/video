@@ -142,11 +142,11 @@ func TestCreatePresignsAndPersistsUploadSession(t *testing.T) {
 	}}
 	service := newTestService(repository, storage)
 
-	result, err := service.Create(context.Background(), "owner-1", "video-1", "VIDEO/MP4", 80)
+	result, err := service.Create(context.Background(), "owner-1", "video-1", "VIDEO/MP4", 80, true)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if !storage.presignCall || repository.createdOwner != "owner-1" {
+	if !storage.presignCall || repository.createdOwner != "owner-1" || !repository.session.GenerateSubtitles {
 		t.Fatal("expected presign and persistence")
 	}
 	if result.Session.Status != uploaddomain.StatusUploading || result.Session.ObjectKey != "users/owner-1/videos/video-1/source/source.mp4" {
@@ -158,10 +158,10 @@ func TestCreateRejectsUnsupportedOrOversizedFile(t *testing.T) {
 	storage := &fakeObjectStorage{}
 	service := newTestService(&fakeUploadRepository{}, storage)
 
-	if _, err := service.Create(context.Background(), "owner-1", "video-1", "video/avi", 10); !errors.Is(err, ErrUnsupportedMedia) {
+	if _, err := service.Create(context.Background(), "owner-1", "video-1", "video/avi", 10, false); !errors.Is(err, ErrUnsupportedMedia) {
 		t.Fatalf("unsupported type error = %v", err)
 	}
-	if _, err := service.Create(context.Background(), "owner-1", "video-1", "video/mp4", 101); !errors.Is(err, ErrUploadTooLarge) {
+	if _, err := service.Create(context.Background(), "owner-1", "video-1", "video/mp4", 101, false); !errors.Is(err, ErrUploadTooLarge) {
 		t.Fatalf("oversized error = %v", err)
 	}
 	if storage.presignCall {

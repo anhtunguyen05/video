@@ -212,14 +212,15 @@ The platform can demonstrate:
 
 ## Status
 
-Proposed; not implemented.
+Implemented as an optional local path; acceptance remains incomplete.
 
 ## Decision
 
 For the post-MVP subtitle increment, evaluate a separate Python worker using
-multilingual faster-whisper and a local model. Produce private WebVTT tracks
-after upload, independently of video READY. The API authorizes track discovery
-and access; the browser renders the completed track. Start with one concurrent
+multilingual faster-whisper and a local model. The owner opts in during upload;
+the option defaults off. Produce complete private WebVTT tracks after upload,
+independently of video READY, without exposing live or partial captions. The API
+authorizes track discovery and access; the browser renders the completed track. Start with one concurrent
 job and benchmark `small` INT8 on the target host before selecting a model or
 GPU configuration. See [AI subtitle design](21_AI_SUBTITLES.md).
 

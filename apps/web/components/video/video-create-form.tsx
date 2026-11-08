@@ -14,6 +14,7 @@ export function VideoCreateForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [generateSubtitles, setGenerateSubtitles] = useState(false);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [session, setSession] = useState<UploadSession | null>(null);
   const [progress, setProgress] = useState(0);
@@ -32,6 +33,7 @@ export function VideoCreateForm() {
     const uploadResponse = await createUpload(activeVideoId, {
       content_type: activeFile.type,
       size_bytes: activeFile.size,
+      generate_subtitles: generateSubtitles,
     });
     setSession(uploadResponse.data);
     await transfer(activeFile, uploadResponse.data);
@@ -105,6 +107,11 @@ export function VideoCreateForm() {
         <input id="video-file" name="video_file" type="file" accept="video/mp4,video/webm" required={!session} disabled={busy} onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
         <p className="field-help">MP4 or WebM, maximum 100 MiB.</p>
       </div>
+      <label>
+        <input type="checkbox" checked={generateSubtitles} disabled={busy || Boolean(session)} onChange={(event) => setGenerateSubtitles(event.target.checked)} />{" "}
+        Generate Vietnamese subtitles with AI
+      </label>
+      <p className="field-help">Subtitles are generated after upload and may contain mistakes.</p>
       {busy || progress > 0 ? (
         <div className="upload-progress" aria-live="polite">
           <div className="upload-progress-heading"><span>{stage === "confirming" ? "Confirming upload" : "Uploading"}</span><span>{progress}%</span></div>

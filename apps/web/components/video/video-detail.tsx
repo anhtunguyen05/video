@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { deleteVideo, getPlayback, getVideo } from "@/lib/api/client";
-import type { Video } from "@/types/video";
+import { deleteVideo, getPlayback, getSubtitles, getVideo } from "@/lib/api/client";
+import type { SubtitleStatus, Video } from "@/types/video";
 import { HlsPlayer } from "@/components/video/hls-player";
 
 function formatDate(value: string): string {
@@ -33,6 +33,8 @@ export function VideoDetail({ videoId }: { videoId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [playbackURL, setPlaybackURL] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [subtitleStatus, setSubtitleStatus] = useState<SubtitleStatus | null>(null);
+  const [subtitleURL, setSubtitleURL] = useState<string | undefined>();
 
   useEffect(() => {
     let active = true;
@@ -62,6 +64,24 @@ export function VideoDetail({ videoId }: { videoId: string }) {
       active = false;
       if (timer) clearTimeout(timer);
     };
+  }, [videoId]);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function load() {
+      try {
+        const result = await getSubtitles(videoId);
+        if (!active) return;
+        setSubtitleStatus(result.data.status);
+        setSubtitleURL(result.data.track_url ? "/api/backend" + result.data.track_url : undefined);
+        if (result.data.status === "PENDING" || result.data.status === "PROCESSING") timer = setTimeout(() => void load(), 5000);
+      } catch {
+        if (active) timer = setTimeout(() => void load(), 10000);
+      }
+    }
+    void load();
+    return () => { active = false; if (timer) clearTimeout(timer); };
   }, [videoId]);
 
   async function refreshPlayback() {
@@ -124,9 +144,10 @@ export function VideoDetail({ videoId }: { videoId: string }) {
             <section className="rendition-section" aria-labelledby="playback-heading">
               <h2 id="playback-heading">HLS playback</h2>
               {playbackError ? <p className="alert alert-error" role="alert">{playbackError}</p> : null}
-              {playbackURL ? <HlsPlayer src={playbackURL} onRefresh={() => void refreshPlayback()} /> : !playbackError ? <p className="muted" aria-live="polite">Preparing playback…</p> : null}
+              {playbackURL ? <HlsPlayer src={playbackURL} subtitleSrc={subtitleURL} onRefresh={() => void refreshPlayback()} /> : !playbackError ? <p className="muted" aria-live="polite">Preparing playback…</p> : null}
             </section>
           ) : null}
+          {subtitleStatus && subtitleStatus !== "NOT_REQUESTED" ? <p className="muted" aria-live="polite">AI Vietnamese subtitles: {subtitleStatus.replace("_", " ")}. {subtitleStatus === "READY" ? "Generated captions may contain mistakes." : ""}</p> : null}
           {video.renditions.length > 0 ? (
             <section className="rendition-section" aria-labelledby="renditions-heading">
               <h2 id="renditions-heading">MP4 renditions</h2>

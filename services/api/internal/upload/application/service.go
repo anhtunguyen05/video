@@ -82,7 +82,7 @@ func NewServiceWithPublisherAndClock(repository ports.Repository, videos VideoRe
 	return &Service{repository: repository, videos: videos, storage: storage, publisher: publisher, clock: clock, policy: policy}
 }
 
-func (service *Service) Create(ctx context.Context, ownerID, videoID, contentType string, sizeBytes int64) (CreateResult, error) {
+func (service *Service) Create(ctx context.Context, ownerID, videoID, contentType string, sizeBytes int64, generateSubtitles bool) (CreateResult, error) {
 	contentType = strings.TrimSpace(strings.ToLower(contentType))
 	if _, ok := service.policy.AllowedTypes[contentType]; !ok {
 		return CreateResult{}, ErrUnsupportedMedia
@@ -123,6 +123,7 @@ func (service *Service) Create(ctx context.Context, ownerID, videoID, contentTyp
 	if err != nil {
 		return CreateResult{}, err
 	}
+	session.GenerateSubtitles = generateSubtitles
 	if err := service.repository.Create(ctx, ownerID, session); err != nil {
 		if errors.Is(err, ports.ErrConflict) {
 			return CreateResult{}, ErrUploadAlreadyActive

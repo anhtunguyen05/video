@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-video}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-video}
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "${POSTGRES_HOST_PORT:-55439}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,8 +19,8 @@ services:
   rabbitmq:
     image: rabbitmq:3.13.7-management-alpine
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "56739:5672"
+      - "15639:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -121,8 +121,72 @@ services:
       retries: 5
       start_period: 10s
 
+  subtitle-model:
+    profiles: ["subtitle-setup"]
+    build:
+      context: ../../services/subtitles
+    command: ["python", "provision_model.py"]
+    environment:
+      SUBTITLE_MODEL_DIR: /models/whisper-small
+    volumes:
+      - subtitle_models:/models
+
+  subtitle-intake:
+    profiles: ["subtitles"]
+    build:
+      context: ../../services/subtitles
+    command: ["python", "request_consumer.py"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  subtitle-worker:
+    profiles: ["subtitles"]
+    build:
+      context: ../../services/subtitles
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minio}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minio123}
+      S3_BUCKET: ${S3_BUCKET:-video-platform}
+      SUBTITLE_MODEL_DIR: /models/whisper-small
+    volumes:
+      - subtitle_models:/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    cpus: 2.0
+    mem_limit: 3g
+    restart: unless-stopped
+
+  subtitle-results:
+    profiles: ["subtitles"]
+    build:
+      context: ../../services/subtitles
+    command: ["python", "result_publisher.py"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-video}:${POSTGRES_PASSWORD:-video}@postgres:5432/${POSTGRES_DB:-video}?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   rabbitmq_data:
   minio_data:
+  subtitle_models:
 

@@ -53,6 +53,8 @@ export type VideoEnvelope = { data: Video };
 export type VideoListEnvelope = { data: VideoList };
 export type PlaybackSession = { type: "hls"; url: string; expires_at: string };
 export type PlaybackEnvelope = { data: PlaybackSession };
+export type SubtitleStatus = "NOT_REQUESTED" | "PENDING" | "PROCESSING" | "READY" | "NO_AUDIO" | "NO_SPEECH" | "FAILED";
+export type SubtitleEnvelope = { data: { status: SubtitleStatus; language: "vi"; track_url?: string } };
 
 export type CreateVideoInput = {
   title: string;
@@ -62,6 +64,7 @@ export type CreateVideoInput = {
 export type CreateUploadInput = {
   content_type: string;
   size_bytes: number;
+  generate_subtitles?: boolean;
 };
 
 export type UploadSession = {

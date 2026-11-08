@@ -210,10 +210,11 @@ Optional after core completion:
 - Kubernetes
 - automatic AI subtitles for uploaded video, as described in [AI subtitle design](21_AI_SUBTITLES.md)
 
-### Planned subtitle extension (not implemented)
+### Subtitle extension (acceptance incomplete)
 
-- Generate timestamped Vietnamese WebVTT captions asynchronously using a local
-  speech recognition model after upload confirmation.
+- Offer an upload option to generate captions, off by default. For opted-in
+  uploads, generate a complete timestamped Vietnamese WebVTT track asynchronously
+  using a local speech recognition model after upload confirmation.
 - Expose subtitle status independently of video processing; playback remains
   available if subtitles are pending or fail.
 - An authorized video owner can load and toggle a ready caption track. Handle
